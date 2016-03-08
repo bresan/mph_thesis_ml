@@ -59,4 +59,15 @@ plot(rf_fit,log="y")
 
 ## SVM
 
+####################################################################
+## Cross-Validate
+cv_results <- function(data,model_names) {
+  require(ModelGood)
+  require(stargazer) # For creating pretty tables -- does this actually work with the roc output?
+  ## Perform bootstrap cross-validation of RoC and Brier scores with 1000 bootstrapped samples
+  roc_results <- Roc(as.list(model_names),data=data,verbose=0,crRatio=1,splitMethod="bootCV",B=1000) 
+  print(roc_results)
+  plot(roc_results, legend=F,yaxis.las=T, col=c("blue","green","red"))
+}
+
 
