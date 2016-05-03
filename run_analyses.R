@@ -17,6 +17,7 @@ require(ggplot2) # For graphing
 require(reshape2) # For potential reshapes 
 require(foreign) # For importing dataset
 require(rpart) # Decision trees
+require(readstata13) # Importing dataset
 
 ## Import analysis and data cleaning functions
 source(paste0(code_dir,"/clean_data.R"))
@@ -31,6 +32,8 @@ id_vars <- c("","","")
 
 ####################################################
 ## Import and Separate Data
+data <- data.table(read.dta13(paste0(data_dir,"/IP data base Nov 2015_Grant Nguyen_3rd Nov 2016.dta")))
+
 data <- data.table(read.dta(paste0(data_dir,"/risk score database for PLoS One_updated 25.9.14.dta")))
 data[,SiteID:=as.character(SiteID)]
 sites <- unique(data[,SiteID])
