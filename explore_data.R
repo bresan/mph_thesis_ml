@@ -3,10 +3,16 @@
 ## Feb 19, 2016
 
 #####################################################
-## Set filepaths etc.
-master_dir <- "/Users/Grant/Desktop/Thesis/"
+## Set filepaths to code and data
+if(c(os)=="Windows") {
+  master_dir <- "H:/Thesis/data"
+  code_dir <- paste0(master_dir,"/mph_thesis_ml")
+} else {
+  master_dir <- "/Users/Grant/Desktop/Thesis"
+  code_dir <- paste0(master_dir,"/code")
+}
+
 data_dir <- paste0(master_dir,"/data")
-code_dir <- paste0(master_dir,"/code")
 
 
 #####################################################
