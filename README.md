@@ -13,7 +13,7 @@ decision-making.
 * Exclude variables that don’t matter
 * Create variable lists: signs, symptoms, treatment, diagnoses, test results, outcomes
 * Turn all variables into binary indicators
-..* May need Herbie’s guidance on indicators not included in the original analysis
+  * May need Herbie’s guidance on indicators not included in the original analysis
 
 02_prep_data.R
 * Apply different methods of imputation or observation-dropping
@@ -24,11 +24,11 @@ decision-making.
 analysis_functions.R
 * Specify one function for each method — assume same data structure, and take in arguments for formula etc.
 * Logistic regression with backwards selection
-..* Define variable importance cutoffs for selection (or default)
+  * Define variable importance cutoffs for selection (or default)
 * Decision trees
-..* Define ideal tree breakdown — pruning characteristics etc.
+  * Define ideal tree breakdown — pruning characteristics etc.
 * Random forests
-..* Source up-sampling/down-sampling methods
+  * Source up-sampling/down-sampling methods
 * Define sampling parameters, number of cv runs, etc.
 * Output predictions, graphical representations, ROC analyses.
 * Save graphs, predictions, and ROC analyses to flat files (how to toggle by source?)
