@@ -11,47 +11,38 @@ Purpose: Clean raw PRISM data to prepare for imputation and finally analysis
 
 ********************************************************
 ** Set locals etc.
-clear all
-set more off
+	clear all
+	set more off
 
-if "`c(os)'" == "Windows" {
-	global data_dir = "H:/Thesis/data"
-} 
-else {
-	global data_dir = "/Users/Grant/Desktop/Thesis"
-}
+	if "`c(os)'" == "Windows" {
+		global data_dir = "H:/Thesis/data"
+	} 
+	else {
+		global data_dir = "/Users/Grant/Desktop/Thesis"
+	}
 
 ********************************************************
 ** Bring in Data
-use "$data_dir/IP data base Nov 2015_Grant Nguyen_Version 2013.dta", clear
+	use "$data_dir/IP data base Nov 2015_Grant Nguyen_Version 2013.dta", clear
 
 
 ********************************************************
 ** Drop extra variables
-// Convert prescription date variable to days since admission variables
-// dateadmit is the admission date (already formatted in Stata dates)
-// Also have monthyear, year, and weekyear variables -- possible covariates?
-
-forvalues i = 1/10 {
-	gen p_lag_`i' = date(Prescriptiondate`i',"YMD###") - dateadmit
-	replace p_lag_`i' = 0 if p_lag_`i' == .
-	// replace p_lag_`i' = 0 if p_lag_`i' < 0 // Fair assumption to make about those with neg values?
-}
-
-
-
-
 // Drop ID and time variables -- not needed, time variables are missing
-drop InPatientNo TimeAdmission *hr* *min* *am_pm* date* // If needed, calculate the days of admission before dropping here
+	drop InPatientNo TimeAdmission *hr* *min* *am_pm* 
 
 // Drop ID variables 
-drop *ID* LabtestNumber *clinician*
+	drop VisitID parishID villageID LabtestNumber *clinician*
 
 // Drop indicators with observed missingness
-drop immunization pulse1 BP Respirations oxygen height MUAC sicklecell Rbloodsugar otherspecify*
+	drop immunization pulse1 BP Respirations oxygen height MUAC sicklecell Rbloodsugar otherspecify* 
 
 // Drop other variables not needed for anaysis
-drop Death1 Death2 Disability
+	drop Death1 Death2 Disability InpatientNo *blood* reason_notgiven Other Date* labtestmissing 
+
+	foreach var of varlist date* {
+		if "`var'" != "dateadmit" drop `var' 
+	}
 
 
 ********************************************************
@@ -60,18 +51,27 @@ drop Death1 Death2 Disability
 // Do the same for Final diagnoses
 	qui { 
 		levelsof AdmissionDiag1, local(diags) c
+		gen dx_match = 0 // Was the primary final diagnosis included in any of the admission diagnoses?
 		foreach diag in `diags' {
-			gen admit_diag_`diag' = 0
-			gen final_diag_`diag' = 0
+			gen dx_admit_`diag' = 0
+			gen dx_final_`diag' = 0
 			forvalues i = 1/10 {
-				replace admit_diag_`diag' = 1 if AdmissionDiag`i' == 1
+				replace dx_admit_`diag' = 1 if AdmissionDiag`i' == 1
+				replace dx_match = 1 if AdmissionDiag`i' == FinalDiag1
 			}
 			forvalues i = 1/6 {
-				replace final_diag_`diag' = 1 if FinalDiag`i' == 1
+				replace dx_final_`diag' = 1 if FinalDiag`i' == 1
 			}
 		}
+		// Do we recode diag_match here for 77/88/99 (diagnosis not clear, missing, or other)?
 	}
-// Keep only the primary diagnosis at admission and end -- since ordering probably matters less after the first
+	
+	// How do the diagnoses stack up against death?
+	tab AdmissionDiag1 anydeath, row
+	tab FinalDiag1 anydeath, row
+	tab dx_match anydeath, row
+	
+// Keep only the primary diagnosis at admission and discharge -- since ordering probably matters less after the first
 	forvalues i = 2/10 {
 		drop AdmissionDiag`i'
 	}
@@ -79,71 +79,150 @@ drop Death1 Death2 Disability
 		drop FinalDiag`i'
 	}
 
+	
+// What treatment was given in the hospital? Was it given at admission or not?
+// Treathosp1/8, TreatAdm1/11, Drugprescribed
+
+// Convert prescription date variable to days since admission variables
+// dateadmit is the admission date (already formatted in Stata dates)
+// Also have monthyear, year, and weekyear variables -- possible covariates?
+	forvalues i = 1/15 {
+		gen p_lag_`i' = date(Prescriptiondate`i',"YMD###") - dateadmit
+		replace p_lag_`i' = 0 if p_lag_`i' == .
+		replace p_lag_`i' = 0 if p_lag_`i' < 0 // Fair assumption to make about those with neg values?
+		drop Prescriptiondate`i'
+	}
+
+qui { 
+	levelsof TreatmentAdm1, local(treatments) c
+	foreach treat in `treatments' {
+		gen tr_admit_`treat' = 0
+		gen tr_hosp_`treat' = 0
+		forvalues i = 1/11 {
+			replace tr_admit_`treat' = 1 if TreatmentAdm`i' == `treat' 
+		}
+		forvalues i = 1/10 {
+			replace tr_admit_`treat' = 1 if drugprescribed`i' == `treat' & p_lag_`i' == 0 // If the treatment was given the same day as admission/ consider it treatment at admission
+			replace tr_hosp_`treat' = 1 if drugprescribed`i' == `treat' & p_lag_`i' > 0 // Otherwise, consider it in-hospital treatment
+		}
+		forvalues i = 1/8 {
+			replace tr_hosp_`treat' = 1 if Treathosp`i' == `treat'
+		}
+	}
+}
+
+drop p_lag_* Treathosp* drugprescribed* TreatmentAdm* 
+
+// Results of BS and/or RDT? and/or Hb6? Or just use labtestresult variable for the test result variable?
+
 
 ********************************************************
 ** Standardize variable formatting/labels
 // Encode/decode certain variables
-
-
-// Standardize yes/nos and other categorizations
-
-
-// Drop all variable and value labels
+	decode SiteID, gen(site_name)
+	
+// Fix ages -- variable age is in months (?), along with significant clumping to major age values
+// How to solve this clumping?
+// Other age variables available -- year, month, day
+	gen age_new = (AgeYrs * 365 + AgeMths* 30.5 + AgeDays) / 30.5 // Age in months
+	sum age
+	sum age_new
+	hist age
+	hist age_new
 
 
 ********************************************************
 ** Recode missing observations to a standard format
-// Get list of numeric variables
-preserve
-describe, replace clear
-levelsof _____ if type == "numeric" 
-restore
 
 // Recode all 9 and 9999 values to missing (treat do not know as missing)
-foreach var of varlist `num_vars' {
-	replace `var' = . if inlist(`var',9,9999)
-}
+	preserve
+	describe, replace clear
+	levelsof name if isnumeric == 1, local(num_vars) c
+	restore
 
-// For certain variables, it may be ok to record missing variables as 0s
-// If the space for drug prescription #5 is missing, but it isn't for #1, we can probably assume that drug #5 was probably not prescribed at all
-forvalues i = 2/5 {
-	replace drugprescribed`i' = 0 if drugprescribed`i' == . & drugprescribed1 != . 
-}
+	foreach var in `num_vars' {
+		replace `var' = . if inlist(`var',99,9999)
+		replace `var' = . if `var' == 9 & !inlist("`var'","Temp","Weight","MUAC","AdmissionDiag1") 
+	}
 
 // Drop all variables with over half missing values (don't want to even consider imputing them)
+/*
 foreach var of varlist `num_vars' {
 	qui count if `var' == . 
 	if `r(N)' > 50000 drop `var' 
 }
+*/
 
 ********************************************************
-** Convert variables from numeric to categorical indicators
-// 
+** Convert binary variables from numeric to categorical indicators
+	// Need to figure out how to subset for binary variables only
+	preserve
+	keep `num_vars'
+	collapse (max) `num_vars'
+	local binary_vars = ""
+	foreach var of varlist * {
+		qui count if `var' > 1 & `var' != .
+		if `r(N)' == 0 local binary_vars = "`binary_vars' `var'"
+	}
+	restore
+	
+	label define binary 1 "Yes" 0 "No"
+	label values `binary_vars' binary
+	foreach var in `binary_vars' {
+		decode `var', gen(str_var)
+		drop `var'
+		rename str_var `var'
+	}
+	
+// Turn all variables to lowercase
+	rename *,lower
+
+
+********************************************************
+** Output preliminary variable list for use
+	cd "$data_dir"
+	preserve
+	describe, replace clear
+	export delimited using cleaned_vars.csv, delimit(",") replace
+	restore
 
 
 ********************************************************
 ** Rename variables intelligibly
-// Rename signs and symptoms variables to ss_*
-local ss_vars = "a b c d "
-local ss_vars = "`ss_vars' e f g h"
 
+// Rename signs and symptoms variables to ss_*
+	local ss_vars = "a b c d "
+	local ss_vars = "`ss_vars' e f g h"
 
 // Rename treatment variables to tr_*
-
+// No need to recode tr_admit and tr_hosp variables because they're already correctly formatted
+	local tr_vars = ""
 
 // Rename testing variables to te_*
-
+	local te_vars = "a b c d "
+	local te_vars = "`te_vars' e f g h"
 
 // Rename diagnosis variables to dx_*
-
+// No need to recode because they're already correctly formatted
+	local dx_vars = ""
 
 // Rename covariates to cv_*
+	local cv_vars = "a b c d "
+	local cv_vars = "`cv_vars' e f g h"
+
+// Enact renames
+	foreach vartype in ss te cv {
+		foreach var in ``vartype'_vars' {
+			rename `var' `vartype'_`var'
+		}
+	}
+
 // dateadmit is the admission date (already formatted in Stata dates)
 // Also have monthyear, year, and weekyear variables -- possible covariates?
 
 
 // Rename outcome variable to death
-
+rename anydeath death
 
 
 ********************************************************
