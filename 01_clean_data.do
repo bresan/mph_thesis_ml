@@ -14,7 +14,7 @@ Purpose: Clean raw PRISM data to prepare for imputation and finally analysis
 clear all
 set more off
 
-if `c(os)' == "Windows" {
+if "`c(os)'" == "Windows" {
 	global data_dir = "H:/Thesis/data"
 } 
 else {
@@ -28,7 +28,18 @@ use "$data_dir/IP data base Nov 2015_Grant Nguyen_Version 2013.dta", clear
 
 ********************************************************
 ** Drop extra variables
-// Convert prescription date variable to days since admission variables (for 
+// Convert prescription date variable to days since admission variables
+// dateadmit is the admission date (already formatted in Stata dates)
+// Also have monthyear, year, and weekyear variables -- possible covariates?
+
+forvalues i = 1/10 {
+	gen p_lag_`i' = date(Prescriptiondate`i',"YMD###") - dateadmit
+	replace p_lag_`i' = 0 if p_lag_`i' == .
+	// replace p_lag_`i' = 0 if p_lag_`i' < 0 // Fair assumption to make about those with neg values?
+}
+
+
+
 
 // Drop ID and time variables -- not needed, time variables are missing
 drop InPatientNo TimeAdmission *hr* *min* *am_pm* date* // If needed, calculate the days of admission before dropping here
@@ -39,14 +50,43 @@ drop *ID* LabtestNumber *clinician*
 // Drop indicators with observed missingness
 drop immunization pulse1 BP Respirations oxygen height MUAC sicklecell Rbloodsugar otherspecify*
 
-// Drop something else
+// Drop other variables not needed for anaysis
+drop Death1 Death2 Disability
+
+
+********************************************************
+** Recode variables with multiple possibilities
+// For  Diagnoses, generate a variable for "if diagnosed at admission, irrespective of order". 
+// Do the same for Final diagnoses
+	qui { 
+		levelsof AdmissionDiag1, local(diags) c
+		foreach diag in `diags' {
+			gen admit_diag_`diag' = 0
+			gen final_diag_`diag' = 0
+			forvalues i = 1/10 {
+				replace admit_diag_`diag' = 1 if AdmissionDiag`i' == 1
+			}
+			forvalues i = 1/6 {
+				replace final_diag_`diag' = 1 if FinalDiag`i' == 1
+			}
+		}
+	}
+// Keep only the primary diagnosis at admission and end -- since ordering probably matters less after the first
+	forvalues i = 2/10 {
+		drop AdmissionDiag`i'
+	}
+	forvalues i = 2/6 {
+		drop FinalDiag`i'
+	}
 
 
 ********************************************************
 ** Standardize variable formatting/labels
 // Encode/decode certain variables
 
+
 // Standardize yes/nos and other categorizations
+
 
 // Drop all variable and value labels
 
@@ -95,6 +135,11 @@ local ss_vars = "`ss_vars' e f g h"
 
 
 // Rename diagnosis variables to dx_*
+
+
+// Rename covariates to cv_*
+// dateadmit is the admission date (already formatted in Stata dates)
+// Also have monthyear, year, and weekyear variables -- possible covariates?
 
 
 // Rename outcome variable to death
