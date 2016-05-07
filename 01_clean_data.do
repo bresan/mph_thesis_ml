@@ -29,7 +29,7 @@ Purpose: Clean raw PRISM data to prepare for imputation and finally analysis
 ********************************************************
 ** Drop extra variables
 // Drop ID and time variables -- not needed, time variables are missing
-	drop InPatientNo TimeAdmission *hr* *min* *am_pm* 
+	drop InPatientNo TimeAdmission *hr* *min* *am_pm* sqldate
 
 // Drop ID variables 
 	drop VisitID parishID villageID LabtestNumber *clinician*
@@ -40,12 +40,15 @@ Purpose: Clean raw PRISM data to prepare for imputation and finally analysis
 // Drop other variables not needed for anaysis
 	drop Death1 Death2 Disability InpatientNo *blood* reason_notgiven Other Date* labtestmissing 
 
-	foreach var of varlist date* {
-		if "`var'" != "dateadmit" drop `var' 
-	}
+	rename dateadmit admit_date
+	drop date*
+	rename admit_date dateadmit 
 	
 	// What is Pulse2? caprefil?
 	drop Pulse2 caprefil BCS NoHBwhy BloodGroup BldRH  // Pulse2 13,277 non-missing, caprefil 38,654 non-missing, BCS (Blantyre Coma Score) 27,207 non-missing, BloodGroup 14,542 non-missing, BldRH 11,510 non-missing
+	
+	// Other extra date variables
+	drop weekyear monthyear 
 	
 // Drop unusable variables (red on variable sheet?)
 	drop Prostration Coma Respiratorydistress AbnormalBleeding Jaudice Haemoglobinuria Convulsions3more circulatorycollapse Pulmonaryoedema ///
@@ -124,13 +127,12 @@ qui {
 
 drop p_lag_* Treathosp* drugprescribed* TreatmentAdm* 
 
-// Results of BS and/or RDT? and/or Hb6? Or just use labtestresult variable for the test result variable?
-
-
 ********************************************************
 ** Standardize variable formatting/labels
 // Encode/decode certain variables
 	decode SiteID, gen(site_name)
+	drop SiteID 
+	rename site_name site_id
 	
 // Fix ages -- variable age is in months, along with significant clumping to major age values
 // How to solve this clumping?
@@ -138,7 +140,7 @@ drop p_lag_* Treathosp* drugprescribed* TreatmentAdm*
 	gen age_new = (AgeYrs * 365 + AgeMths* 30.5 + AgeDays) / 30.5 // Age in months
 	sum age
 	sum age_new
-	drop age
+	drop age_new
 
 // Drop all recorded cases over 5 years of age
 	keep if age < 60
@@ -146,6 +148,22 @@ drop p_lag_* Treathosp* drugprescribed* TreatmentAdm*
 	// kdensity age, n(87137) gen(test1 test2) bwidth(6)
 	// replace test1 = 0 if test1 < 0
 
+// Generate a string variable for anti-malarial treatment
+	gen tx_anti_malarial = ""
+	replace tx_anti_malarial = "none" if quinineother == 0
+	replace tx_anti_malarial = "quinine" if quinineother == 1 
+	replace tx_anti_malarial = "other" if quinineother == 2
+	drop anyantimalarial otherantimalarial quinine*
+	
+// Generate a string variable for malaria test result (and then complicated or not)
+	decode malaria, gen(malaria_test)
+	replace malaria_test = "Complicated" if compmalaria == 1 
+	replace malaria_test = "Uncomplicated" if malaria_test == "Yes"
+	replace malaria_test = "None" if malaria_test == "No"
+	drop compmalaria malaria labtestresult
+	rename clinicalmalaria malaria_final // This is the final diagnosis of malaria, rather than the malaria test
+
+	
 ********************************************************
 ** Recode missing observations to a standard format
 
@@ -197,42 +215,52 @@ foreach var of varlist `num_vars' {
 	rename *,lower
 
 ********************************************************
-** Output preliminary variable list for use in variable pruning
+** Output preliminary variable list for use in variable pruning	
+// Drop some treatment variables with very low fill-out rates, or covered by other variables
+	drop *transfus* *bldtran* tranfusdate 
+	drop amodiaquine artemetherim artesunateiv artesunateoral artesunaterectal chloroquine al sp arco dp
+	
+// Preliminary: To drop or keep this set of variables that are all bunched together and included/not?
+	drop oxygen ivfluids nutrition tepidspong kpw nasogastric leftlateral
+
+// Drop macro age variables
+	drop ageyrs agemths agedays
+	
 	cd "$data_dir"
 	preserve
 	describe, replace clear
-	export delimited using cleaned_vars.csv, delimit(",") replace
+	export delimited using "prelim_vars.csv", delimit(",") replace
 	restore
 
 
 ********************************************************
 ** Rename variables intelligibly
+
 // Make variable labels a bit more self-explanatory
 	rename (bs1admit rdtadmit hblevel admissiondiag1 finaldiag1) (bs_admit rdt_admit hb_level dx_1_admission dx_1_final)
 
 // Rename signs and symptoms variables to ss_*
 	local ss_vars = "fever cough cough2weeks diffbreath convulsions altconsciousness vomiting unabledrink diarrhea diarrhea2wks bldydiarrhea teaurine"
 	local ss_vars = "`ss_vars' temp weight pallor severe_wasting sunken_eyes skin_pinch edema jaundice dpbreath flarnostril icrecession subcostal airway wheezing"
-	local ss_vars = "`ss_vars' crackles unconscious lethargy unablesit bgfontanelle unablepain stiffneck kerning" 
+	local ss_vars = "`ss_vars' crackles unconscious lethargy unablesit bgfontanelle unablepain stiffneck kerning rhonchi severeanaemia hypoglycemia disposition" 
 
 // Rename treatment variables to tr_*
 // No need to recode tr_admit and tr_hosp variables because they're already correctly formatted
-	local tr_vars = ""
+	local tr_vars = "" // Duplicative of existing treatment data?
 
 // Rename testing variables to te_*
-	local te_vars = "bs_admit rdt_admit hb_desired hb_done hb_level"
+	local te_vars = "bs_admit rdt_admit hb_desired hb_done hb_level hiv malaria_test" 
 	local te_vars = "`te_vars'"
 
-// Rename diagnosis variables to dx_*
-// No need to recode because they're already correctly formatted
-	local dx_vars = ""
+// Rename extra diagnosis variables to dx_*
+	local dx_vars = "malaria_final"
 
 // Rename covariates to cv_*
-	local cv_vars = "readmission gender days " // Is days LOS? 
+	local cv_vars = "readmission gender days dateadmit year age" // Is days equivalent to length of stay?
 	local cv_vars = "`cv_vars'"
 
 // Enact renames
-	foreach vartype in ss te cv {
+	foreach vartype in ss te dx cv {
 		foreach var in ``vartype'_vars' {
 			rename `var' `vartype'_`var'
 		}
@@ -241,13 +269,19 @@ foreach var of varlist `num_vars' {
 // dateadmit is the admission date (already formatted in Stata dates)
 // Also have monthyear, year, and weekyear variables -- possible covariates?
 
+// Drop bs and rdt test variables (after the admit variables have been renamed) 
+	drop bs* rdt* hb*
 
-// Rename outcome variable to death
-rename anydeath death
+// Rename outcome variable to death (also have malariadeath as another potential outcome)
+	rename anydeath death
 
+// Output a cleaned variable list
+	preserve
+	describe, replace clear
+	export delimited using "cleaned_vars.csv", delimit(",") replace
+	restore
 
 ********************************************************
 ** Output data
-
 cd "$data_dir"
-export delimited using "cleaned_data.csv", delimit(",") replace
+export delimited using "01_cleaned_data.csv", delimit(",") replace
