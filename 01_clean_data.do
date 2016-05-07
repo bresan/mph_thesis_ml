@@ -43,6 +43,14 @@ Purpose: Clean raw PRISM data to prepare for imputation and finally analysis
 	foreach var of varlist date* {
 		if "`var'" != "dateadmit" drop `var' 
 	}
+	
+	// What is Pulse2? caprefil?
+	drop Pulse2 caprefil BCS NoHBwhy BloodGroup BldRH  // Pulse2 13,277 non-missing, caprefil 38,654 non-missing, BCS (Blantyre Coma Score) 27,207 non-missing, BloodGroup 14,542 non-missing, BldRH 11,510 non-missing
+	
+// Drop unusable variables (red on variable sheet?)
+	drop Prostration Coma Respiratorydistress AbnormalBleeding Jaudice Haemoglobinuria Convulsions3more circulatorycollapse Pulmonaryoedema ///
+		Acidosis RenalImpairment Hyperlactataemia Hyperparasitemia vomitingeverything Convulsion2less Inabilitytodrinkorbreastfeed lethargicorunconscious /// 
+		coomorbidity CantaccessACTs ACToutofstock unabletoreturn moderatelysick parentalrequest  
 
 
 ********************************************************
@@ -86,6 +94,9 @@ Purpose: Clean raw PRISM data to prepare for imputation and finally analysis
 // Convert prescription date variable to days since admission variables
 // dateadmit is the admission date (already formatted in Stata dates)
 // Also have monthyear, year, and weekyear variables -- possible covariates?
+
+// Use date* variable instead of Prescriptiondate variable to get the date that the medicine was administered, rather than prescribed? 
+// date* has more missingness than Prescribed -- due to lack of administration, or something else?
 	forvalues i = 1/15 {
 		gen p_lag_`i' = date(Prescriptiondate`i',"YMD###") - dateadmit
 		replace p_lag_`i' = 0 if p_lag_`i' == .
@@ -121,15 +132,19 @@ drop p_lag_* Treathosp* drugprescribed* TreatmentAdm*
 // Encode/decode certain variables
 	decode SiteID, gen(site_name)
 	
-// Fix ages -- variable age is in months (?), along with significant clumping to major age values
+// Fix ages -- variable age is in months, along with significant clumping to major age values
 // How to solve this clumping?
 // Other age variables available -- year, month, day
 	gen age_new = (AgeYrs * 365 + AgeMths* 30.5 + AgeDays) / 30.5 // Age in months
 	sum age
 	sum age_new
-	hist age
-	hist age_new
+	drop age
 
+// Drop all recorded cases over 5 years of age
+	keep if age < 60
+	// kdensity age
+	// kdensity age, n(87137) gen(test1 test2) bwidth(6)
+	// replace test1 = 0 if test1 < 0
 
 ********************************************************
 ** Recode missing observations to a standard format
@@ -140,11 +155,13 @@ drop p_lag_* Treathosp* drugprescribed* TreatmentAdm*
 	levelsof name if isnumeric == 1, local(num_vars) c
 	restore
 
-	foreach var in `num_vars' {
-		replace `var' = . if inlist(`var',99,9999)
-		replace `var' = . if `var' == 9 & !inlist("`var'","Temp","Weight","MUAC","AdmissionDiag1") 
+	qui {
+		foreach var in `num_vars' {
+			replace `var' = . if inlist(`var',99,9999)
+			replace `var' = . if `var' == 9 & !inlist("`var'","Temp","Weight","MUAC","AdmissionDiag1","BS1admit","RDTadmit","HIV") 
+		}
 	}
-
+	
 // Drop all variables with over half missing values (don't want to even consider imputing them)
 /*
 foreach var of varlist `num_vars' {
@@ -156,6 +173,7 @@ foreach var of varlist `num_vars' {
 ********************************************************
 ** Convert binary variables from numeric to categorical indicators
 	// Need to figure out how to subset for binary variables only
+	/*
 	preserve
 	keep `num_vars'
 	collapse (max) `num_vars'
@@ -173,13 +191,13 @@ foreach var of varlist `num_vars' {
 		drop `var'
 		rename str_var `var'
 	}
+	*/
 	
 // Turn all variables to lowercase
 	rename *,lower
 
-
 ********************************************************
-** Output preliminary variable list for use
+** Output preliminary variable list for use in variable pruning
 	cd "$data_dir"
 	preserve
 	describe, replace clear
@@ -189,26 +207,29 @@ foreach var of varlist `num_vars' {
 
 ********************************************************
 ** Rename variables intelligibly
+// Make variable labels a bit more self-explanatory
+	rename (bs1admit rdtadmit hblevel admissiondiag1 finaldiag1) (bs_admit rdt_admit hb_level dx_1_admission dx_1_final)
 
 // Rename signs and symptoms variables to ss_*
-	local ss_vars = "a b c d "
-	local ss_vars = "`ss_vars' e f g h"
+	local ss_vars = "fever cough cough2weeks diffbreath convulsions altconsciousness vomiting unabledrink diarrhea diarrhea2wks bldydiarrhea teaurine"
+	local ss_vars = "`ss_vars' temp weight pallor severe_wasting sunken_eyes skin_pinch edema jaundice dpbreath flarnostril icrecession subcostal airway wheezing"
+	local ss_vars = "`ss_vars' crackles unconscious lethargy unablesit bgfontanelle unablepain stiffneck kerning" 
 
 // Rename treatment variables to tr_*
 // No need to recode tr_admit and tr_hosp variables because they're already correctly formatted
 	local tr_vars = ""
 
 // Rename testing variables to te_*
-	local te_vars = "a b c d "
-	local te_vars = "`te_vars' e f g h"
+	local te_vars = "bs_admit rdt_admit hb_desired hb_done hb_level"
+	local te_vars = "`te_vars'"
 
 // Rename diagnosis variables to dx_*
 // No need to recode because they're already correctly formatted
 	local dx_vars = ""
 
 // Rename covariates to cv_*
-	local cv_vars = "a b c d "
-	local cv_vars = "`cv_vars' e f g h"
+	local cv_vars = "readmission gender days " // Is days LOS? 
+	local cv_vars = "`cv_vars'"
 
 // Enact renames
 	foreach vartype in ss te cv {
