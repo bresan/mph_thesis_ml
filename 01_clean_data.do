@@ -23,7 +23,22 @@ Purpose: Clean raw PRISM data to prepare for imputation and finally analysis
 
 ********************************************************
 ** Bring in Data
+// First, bring in inpatient data dictionary, to use in assigning possible treatments and diagnoses
+	import excel using "$data_dir/inpatient data dictionary 1 Jan 14.xlsx", clear firstrow sheet("Diagnosis")
+	rename (code ADMISSIONDIAGNOSIS) (diag_code diagnosis)
+	tempfile diagnoses
+	save `diagnoses'
+	
+	import excel using "$data_dir/inpatient data dictionary 1 Jan 14.xlsx", clear firstrow sheet("treatment")
+	drop C D
+	rename (code Treatment) (tr_code treatment)
+	tempfile diagnoses
+	save `diagnoses'
+
+// Now, bring in the actual dataset and save a tempfile for easy interactive reference
 	use "$data_dir/IP data base Nov 2015_Grant Nguyen_Version 2013.dta", clear
+	tempfile master
+	save `master'
 
 
 ********************************************************
@@ -38,10 +53,9 @@ Purpose: Clean raw PRISM data to prepare for imputation and finally analysis
 	drop immunization pulse1 BP Respirations oxygen height MUAC sicklecell Rbloodsugar otherspecify* 
 
 // Drop other variables not needed for anaysis
-	drop Death1 Death2 Disability InpatientNo *blood* reason_notgiven Other Date* labtestmissing 
+	drop Death1 Death2 Disability InpatientNo *blood* reason_notgiven Other labtestmissing 
 
 	rename dateadmit admit_date
-	drop date*
 	rename admit_date dateadmit 
 	
 	// What is Pulse2? caprefil?
@@ -62,18 +76,27 @@ Purpose: Clean raw PRISM data to prepare for imputation and finally analysis
 // Do the same for Final diagnoses
 	qui { 
 		levelsof AdmissionDiag1, local(diags) c
-		gen dx_match = 0 // Was the primary final diagnosis included in any of the admission diagnoses?
+		gen dx_match = 0 // Are there any matching diagnoses between the diagnosis at admission and death?
 		foreach diag in `diags' {
 			gen dx_admit_`diag' = 0
 			gen dx_final_`diag' = 0
 			forvalues i = 1/10 {
 				replace dx_admit_`diag' = 1 if AdmissionDiag`i' == 1
-				replace dx_match = 1 if AdmissionDiag`i' == FinalDiag1
+				forvalues j = 1/6 {
+					replace dx_match = dx_match + 1 if AdmissionDiag`i' == FinalDiag`j' & AdmissionDiag`i' != .
+				}
 			}
 			forvalues i = 1/6 {
 				replace dx_final_`diag' = 1 if FinalDiag`i' == 1
 			}
 		}
+		
+		egen dx_admit_count = rowtotal(dx_admit_*)
+		egen dx_final_count = rowtotal(dx_final_*)
+		// Calculate the Jacquard distance between admission and final diagnoses -- essentially,
+		// Number of matching diagnoses divided by number of diagnoses present only in admission or final
+		gen dx_match_dist = dx_match / (dx_admit_count + dx_final_count)
+		
 		// Do we recode diag_match here for 77/88/99 (diagnosis not clear, missing, or other)?
 	}
 	
@@ -83,12 +106,17 @@ Purpose: Clean raw PRISM data to prepare for imputation and finally analysis
 	tab dx_match anydeath, row
 	
 // Keep only the primary diagnosis at admission and discharge -- since ordering probably matters less after the first
+	/*
+
 	forvalues i = 2/10 {
 		drop AdmissionDiag`i'
 	}
 	forvalues i = 2/6 {
 		drop FinalDiag`i'
 	}
+	*/
+	
+// New hypothesis: all the diagnoses are unordered (checkboxes)
 
 	
 // What treatment was given in the hospital? Was it given at admission or not?
@@ -98,14 +126,29 @@ Purpose: Clean raw PRISM data to prepare for imputation and finally analysis
 // dateadmit is the admission date (already formatted in Stata dates)
 // Also have monthyear, year, and weekyear variables -- possible covariates?
 
-// Use date* variable instead of Prescriptiondate variable to get the date that the medicine was administered, rather than prescribed? 
-// date* has more missingness than Prescribed -- due to lack of administration, or something else?
+// Use Prescriptiondate variable to get the date that the medicine was prescribed 
+// There is also a date* variable, for date of drug administration, but that has much more missingness
+
+// Test out generating a variable seeing if (if there was a positive malaria test), 
+// how long treatment was delayed after the positive test
+// Test dates only have 10K non-missing, how/why?
+	gen date_firstpositive = . // Date of first positive malaria test
+	gen date_first_tr_mal = . // Date of first treatment for malaria
+	forvalues i = 1/6 {
+		replace date_firstpositive = date(Date`i',"YMD###") if (BS`i' == 1 | RDT`i' == 1) & date_firstpositive == .
+	}
+
 	forvalues i = 1/15 {
 		gen p_lag_`i' = date(Prescriptiondate`i',"YMD###") - dateadmit
 		replace p_lag_`i' = 0 if p_lag_`i' == .
-		replace p_lag_`i' = 0 if p_lag_`i' < 0 // Fair assumption to make about those with neg values?
+		replace p_lag_`i' = 0 if p_lag_`i' < 0 // If date is negative, we assume it to be at admission
+		replace p_lag_`i' = 0 if p_lag_`i' == 365 // Year miscoding: If a year away, we assume it to be at date of admission and treat it as such
+		replace date_first_tr_mal = date(date1`i',"YMD###") if date1`i' != "" & (date_first_tr_mal == . | date_first_tr_mal < date(date1`i',"YMD###")) & inlist(drugprescribed`i',1,2,3) // Get list of antimalarials to plug in here
 		drop Prescriptiondate`i'
 	}
+	gen lag_tr_mal = date_first_tr_mal - date_firstpositive
+	sum lag_tr_mal
+	drop date* Date*
 
 qui { 
 	levelsof TreatmentAdm1, local(treatments) c
@@ -115,7 +158,7 @@ qui {
 		forvalues i = 1/11 {
 			replace tr_admit_`treat' = 1 if TreatmentAdm`i' == `treat' 
 		}
-		forvalues i = 1/10 {
+		forvalues i = 1/15 {
 			replace tr_admit_`treat' = 1 if drugprescribed`i' == `treat' & p_lag_`i' == 0 // If the treatment was given the same day as admission/ consider it treatment at admission
 			replace tr_hosp_`treat' = 1 if drugprescribed`i' == `treat' & p_lag_`i' > 0 // Otherwise, consider it in-hospital treatment
 		}
@@ -134,19 +177,46 @@ drop p_lag_* Treathosp* drugprescribed* TreatmentAdm*
 	drop SiteID 
 	rename site_name site_id
 	
+// Determine the length of stay, using date of discharge and admission
+	replace Datedischarge = subinstr(Datedischarge,"301","201",.) // If year is coded as 3013
+	replace Datedischarge = subinstr(Datedischarge,"2044","2011",.)
+	replace Datedischarge = subinstr(Datedischarge,"2021","2012",.)
+	replace Datedischarge = subinstr(Datedischarge,"2020","2010",.)
+	replace Datedischarge = subinstr(Datedischarge,"1930","2012",.)
+	replace Datedischarge = subinstr(Datedischarge,"1931","2012",.)
+
+	gen admit_duration = date(Datedischarge,"YMD###") - dateadmit
+	replace admit_duration = . if admit_duration < 0 | admit_duration > 365 // Consider these outliers and treat them as missing
+	
 // Fix ages -- variable age is in months, along with significant clumping to major age values
 // How to solve this clumping?
 // Other age variables available -- year, month, day
+	/*
 	gen age_new = (AgeYrs * 365 + AgeMths* 30.5 + AgeDays) / 30.5 // Age in months
 	sum age
 	sum age_new
 	drop age_new
-
+	*/
+	
 // Drop all recorded cases over 5 years of age
 	keep if age < 60
+	hist age
+	graph export "$data_dir/../graphs/age_dist.pdf", replace
 	// kdensity age
 	// kdensity age, n(87137) gen(test1 test2) bwidth(6)
 	// replace test1 = 0 if test1 < 0
+	
+// Recode ages to a categorical to address age clumping
+	egen age_cat = cut(age), at(0 1 6 12 18 24 30 36 42 48 54 60) // Cut at 0-1 age group, then 6-month age groups after that
+	gen age_end = age_cat + 5
+	replace age_end = 5 if age_cat = 1
+	replace age_end = 1 if age_cat = 1
+	tostring age_end, replace
+	tab age_cat
+	tostring age_cat, replace
+	replace age_cat = age_cat + " to " + age_end + " months"
+	drop age age_end
+	rename age_cat age
 
 // Generate a string variable for anti-malarial treatment
 	gen tx_anti_malarial = ""
@@ -256,7 +326,7 @@ foreach var of varlist `num_vars' {
 	local dx_vars = "malaria_final"
 
 // Rename covariates to cv_*
-	local cv_vars = "readmission gender days dateadmit year age" // Is days equivalent to length of stay?
+	local cv_vars = "readmission gender dateadmit year age admit_duration" 
 	local cv_vars = "`cv_vars'"
 
 // Enact renames

@@ -19,11 +19,6 @@ data_dir <- paste0(master_dir,"/data")
 ## Set Packages
 require(data.table) # For easy data management
 require(ggplot2) # For graphing
-require(reshape2) # For potential reshapes 
-require(foreign) # For importing dataset
-require(rpart) # Decision trees
-require(readstata13) # Importing dataset
-require(haven)
 
 
 #####################################################
@@ -53,15 +48,47 @@ require(haven)
 ## Impute all missing values using Multiple Imputation
 
 ## Define MI wrapper to apply different types of MI
-impute_missing <- function(data,pred_vars,mi_type="mi_gelman") {
-
-  
+impute_missing <- function(data,id_vars,mi_type="mi_gelman") {
   ## Apply multiple imputation to a dataset and a set of prediction variables, using Andrew Gelman's MI package
   ## We use this to feed imputed data into the Random Forests analysis, as it requires a complete dataset
   ## MI comparisons here: http://thomasleeper.com/Rcourse/Tutorials/mi.html
+  
+  ## First, prepare variable lists
+  get_min_max <- function(x) {
+    c(min=min(x,na.rm=T),max=max(x,na.rm=T))
+  }
+  pred_vars <- data.table(data)[,lapply(.SD,get_min_max)]
+  pred_vars[1,type:="min_val"]
+  pred_vars[2,type:="max_val"]
+  pred_vars <- melt(pred_vars,id.vars=c("type"),variable.name="master_var",value.name="val")
+  pred_vars[,master_var:=as.character(master_var)]
+  pred_vars <- data.table(dcast(pred_vars,master_var~type,value.var="val"))     
+  
+  pred_vars[,test_var:=as.numeric(max_val)] # Figure out which are numeric or not, and which of the numeric ones are nominal(binary 1/0)
+  same_vars <- unique(pred_vars[min_val==max_val,master_var]) # Get a list of variables where the min and max do not vary
+  
+  print("Removing the following variables which do not vary in the dataset: ")
+  print(same_vars)
+  data[,c(same_vars):=NULL]
+  
+  pred_vars <- pred_vars[min_val != max_val,]
+  
+  ## Do we want to be imputing our outcome? Or not? 
+  # > table(master_data[,death])
+  # 
+  #       No   Yes 
+  # 528 80979  2583
+  
+  nom_vars <- unique(pred_vars[(test_var==1|is.na(test_var)) & !(master_var %in% id_vars),master_var])
+  cont_vars <- unique(pred_vars[!master_var %in% c(nom_vars,id_vars),master_var])
+  
+  ## Remove variables that only have the same outcomes
+  nom_vars <- nom_vars[!nom_vars %in% same_vars]
+  cont_vars <- cont_vars[!cont_vars %in% same_vars]
+  
   if(mi_type == "mi_gelman") {
     require(mi)
-    data <- missing_data.frame(data.frame(data[,.SD,.SDcols=c(pred_vars)]))
+    data <- missing_data.frame(data.frame(data[,.SD,.SDcols=c(nom_vars,cont_vars)]))
     show(data)
     # change() # If I want to change the transformation, imputation method,etc
     summary(data)
@@ -72,23 +99,30 @@ impute_missing <- function(data,pred_vars,mi_type="mi_gelman") {
     
     ## Here, return the imputations as separate data frames (or do we just run the analysis separately here?)
   } else if(mi_type == "amelia") {
-    
+    # Troubleshooting Amelia: https://lists.gking.harvard.edu/pipermail/amelia/2013-July/001030.html
+    require(Amelia)
+    imputed_dataset <- amelia(x=data.frame(data),m=3, # where m = number of datasets to construct
+                              idvars=id_vars,
+                              noms=nom_vars # Nominal/categorical variables
+                             ) # cont_vars = continuous variable
   } else if(mi_type == "mice") {
     
   }
 }
 
 ## Apply MI function
-pred_vars <- names(master_data)[!names(master_data) %in% c("death","malariadeath")]
-
+  
 ## Test out MI on 5,000 random observations, before scaling it up and applying the true function
-mi_type = "mi_gelman"
-set.seed(9840294)
-data <- copy(master_data) 
-data[,sort_obs:=rnorm(nrow(data))]
-data <- data[order(sort_obs)]
-data <- data[1:5000,]
-data[,sort_obs:=NULL]
+  test_mi = "amelia"
+  set.seed(9840294)
+  data <- copy(master_data) 
+  data[,sort_obs:=rnorm(nrow(data))]
+  data <- data[order(sort_obs)]
+  data <- data[1:5000,]
+  data[,sort_obs:=NULL]
 
-imputed_data <- system.time(impute_missing(data,pred_vars,mi_type="mi_gelman"))
-
+  id_vars <- c("cv_dateadmit","dx_malaria_final","death","malariadeath")
+  convert_vars <- c("dx_malaria_final","death","malariadeath") ## Need to convert to nominal eventually rather than using as an id var
+  
+  imputed_data <- system.time(impute_missing(data,id_vars,mi_type=test_mi))
+  
