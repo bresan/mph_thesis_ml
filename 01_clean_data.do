@@ -53,10 +53,7 @@ Purpose: Clean raw PRISM data to prepare for imputation and finally analysis
 	drop immunization pulse1 BP Respirations oxygen height MUAC sicklecell Rbloodsugar otherspecify* 
 
 // Drop other variables not needed for anaysis
-	drop Death1 Death2 Disability InpatientNo *blood* reason_notgiven Other labtestmissing 
-
-	rename dateadmit admit_date
-	rename admit_date dateadmit 
+	drop Death1 Death2 Disability InpatientNo *blood* reason_notgiven Other labtestmissing  
 	
 	// What is Pulse2? caprefil?
 	drop Pulse2 caprefil BCS NoHBwhy BloodGroup BldRH  // Pulse2 13,277 non-missing, caprefil 38,654 non-missing, BCS (Blantyre Coma Score) 27,207 non-missing, BloodGroup 14,542 non-missing, BldRH 11,510 non-missing
@@ -148,7 +145,7 @@ Purpose: Clean raw PRISM data to prepare for imputation and finally analysis
 	}
 	gen lag_tr_mal = date_first_tr_mal - date_firstpositive
 	sum lag_tr_mal
-	drop date* Date*
+	drop lag_tr_mal // seems like there may not be enough coverage of testing dates for this to work -- although we still need to test with true antimalarial list!
 
 qui { 
 	levelsof TreatmentAdm1, local(treatments) c
@@ -167,8 +164,8 @@ qui {
 		}
 	}
 }
-
 drop p_lag_* Treathosp* drugprescribed* TreatmentAdm* 
+
 
 ********************************************************
 ** Standardize variable formatting/labels
@@ -209,8 +206,8 @@ drop p_lag_* Treathosp* drugprescribed* TreatmentAdm*
 // Recode ages to a categorical to address age clumping
 	egen age_cat = cut(age), at(0 1 6 12 18 24 30 36 42 48 54 60) // Cut at 0-1 age group, then 6-month age groups after that
 	gen age_end = age_cat + 5
-	replace age_end = 5 if age_cat = 1
-	replace age_end = 1 if age_cat = 1
+	replace age_end = 5 if age_cat == 1
+	replace age_end = 1 if age_cat == 0
 	tostring age_end, replace
 	tab age_cat
 	tostring age_cat, replace
@@ -281,11 +278,18 @@ foreach var of varlist `num_vars' {
 	}
 	*/
 	
-// Turn all variables to lowercase
-	rename *,lower
 
 ********************************************************
 ** Output preliminary variable list for use in variable pruning	
+// dateadmit is the admission date (already formatted in Stata dates)
+// Also have monthyear, year, and weekyear variables -- possible covariates?
+	rename dateadmit admit_date
+	drop date* Date*
+	rename admit_date dateadmit
+
+// Turn all variables to lowercase
+	rename *,lower	
+	
 // Drop some treatment variables with very low fill-out rates, or covered by other variables
 	drop *transfus* *bldtran* tranfusdate 
 	drop amodiaquine artemetherim artesunateiv artesunateoral artesunaterectal chloroquine al sp arco dp
@@ -336,15 +340,13 @@ foreach var of varlist `num_vars' {
 		}
 	}
 
-// dateadmit is the admission date (already formatted in Stata dates)
-// Also have monthyear, year, and weekyear variables -- possible covariates?
 
 // Drop bs and rdt test variables (after the admit variables have been renamed) 
 	drop bs* rdt* hb*
 
 // Rename outcome variable to death (also have malariadeath as another potential outcome)
 	rename anydeath death
-
+	
 // Output a cleaned variable list
 	preserve
 	describe, replace clear
