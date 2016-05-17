@@ -29,11 +29,11 @@ Purpose: Clean raw PRISM data to prepare for imputation and finally analysis
 	tempfile diagnoses
 	save `diagnoses'
 	
-	import excel using "$data_dir/inpatient data dictionary 1 Jan 14.xlsx", clear firstrow sheet("treatment")
-	drop C D
-	rename (code Treatment) (tr_code treatment)
-	tempfile diagnoses
-	save `diagnoses'
+	import delimited using "$data_dir/treatment_map.csv", clear
+	rename code tr_code
+	levelsof parent_drug, local(treatment_bins) c
+	tempfile treatment
+	save `treatment'
 
 // Now, bring in the actual dataset and save a tempfile for easy interactive reference
 	use "$data_dir/IP data base Nov 2015_Grant Nguyen_Version 2013.dta", clear
@@ -78,13 +78,13 @@ Purpose: Clean raw PRISM data to prepare for imputation and finally analysis
 			gen dx_admit_`diag' = 0
 			gen dx_final_`diag' = 0
 			forvalues i = 1/10 {
-				replace dx_admit_`diag' = 1 if AdmissionDiag`i' == 1
+				replace dx_admit_`diag' = 1 if AdmissionDiag`i' == `diag'
 				forvalues j = 1/6 {
-					replace dx_match = dx_match + 1 if AdmissionDiag`i' == FinalDiag`j' & AdmissionDiag`i' != .
+					replace dx_match = dx_match + 1 if AdmissionDiag`i' == FinalDiag`j' & AdmissionDiag`i' != . 
 				}
 			}
 			forvalues i = 1/6 {
-				replace dx_final_`diag' = 1 if FinalDiag`i' == 1
+				replace dx_final_`diag' = 1 if FinalDiag`i' == `diag'
 			}
 		}
 		
@@ -98,23 +98,10 @@ Purpose: Clean raw PRISM data to prepare for imputation and finally analysis
 	}
 	
 	// How do the diagnoses stack up against death?
-	tab AdmissionDiag1 anydeath, row
-	tab FinalDiag1 anydeath, row
 	tab dx_match anydeath, row
 	
-// Keep only the primary diagnosis at admission and discharge -- since ordering probably matters less after the first
-	/*
-
-	forvalues i = 2/10 {
-		drop AdmissionDiag`i'
-	}
-	forvalues i = 2/6 {
-		drop FinalDiag`i'
-	}
-	*/
+	drop AdmissionDiag* FinalDiag*
 	
-// New hypothesis: all the diagnoses are unordered (checkboxes)
-
 	
 // What treatment was given in the hospital? Was it given at admission or not?
 // Treathosp1/8, TreatAdm1/11, Drugprescribed
@@ -148,19 +135,29 @@ Purpose: Clean raw PRISM data to prepare for imputation and finally analysis
 	drop lag_tr_mal // seems like there may not be enough coverage of testing dates for this to work -- although we still need to test with true antimalarial list!
 
 qui { 
-	levelsof TreatmentAdm1, local(treatments) c
-	foreach treat in `treatments' {
-		gen tr_admit_`treat' = 0
-		gen tr_hosp_`treat' = 0
-		forvalues i = 1/11 {
-			replace tr_admit_`treat' = 1 if TreatmentAdm`i' == `treat' 
-		}
-		forvalues i = 1/15 {
-			replace tr_admit_`treat' = 1 if drugprescribed`i' == `treat' & p_lag_`i' == 0 // If the treatment was given the same day as admission/ consider it treatment at admission
-			replace tr_hosp_`treat' = 1 if drugprescribed`i' == `treat' & p_lag_`i' > 0 // Otherwise, consider it in-hospital treatment
-		}
-		forvalues i = 1/8 {
-			replace tr_hosp_`treat' = 1 if Treathosp`i' == `treat'
+	// levelsof TreatmentAdm1, local(treatments) c
+	foreach treat_bin in `treatment_bins' {
+		di "Processing `treat_bin'"
+		preserve
+		// Grab the numeric code for all specific treatments within the broader treatment bins
+		use `treatment' if parent_drug == "`treat_bin'", clear
+		levelsof tr_code, local(treatment_codes) c
+		restore
+		
+		gen tr_admit_`treat_bin' = 0
+		gen tr_hosp_`treat_bin' = 0
+		
+		foreach treat in `treatment_codes' {
+			forvalues i = 1/11 {
+				replace tr_admit_`treat_bin' = 1 if TreatmentAdm`i' == `treat' 
+			}
+			forvalues i = 1/15 {
+				replace tr_admit_`treat_bin' = 1 if drugprescribed`i' == `treat' & p_lag_`i' == 0 // If the treatment was given the same day as admission/ consider it treatment at admission
+				replace tr_hosp_`treat_bin' = 1 if drugprescribed`i' == `treat' & p_lag_`i' > 0 // Otherwise, consider it in-hospital treatment
+			}
+			forvalues i = 1/8 {
+				replace tr_hosp_`treat_bin' = 1 if Treathosp`i' == `treat'
+			}
 		}
 	}
 }
@@ -185,8 +182,7 @@ drop p_lag_* Treathosp* drugprescribed* TreatmentAdm*
 	gen admit_duration = date(Datedischarge,"YMD###") - dateadmit
 	replace admit_duration = . if admit_duration < 0 | admit_duration > 365 // Consider these outliers and treat them as missing
 	
-// Fix ages -- variable age is in months, along with significant clumping to major age values
-// How to solve this clumping?
+// Fix ages -- variable age is in months, along with significant heaping to major age values
 // Other age variables available -- year, month, day
 	/*
 	gen age_new = (AgeYrs * 365 + AgeMths* 30.5 + AgeDays) / 30.5 // Age in months
@@ -203,8 +199,8 @@ drop p_lag_* Treathosp* drugprescribed* TreatmentAdm*
 	// kdensity age, n(87137) gen(test1 test2) bwidth(6)
 	// replace test1 = 0 if test1 < 0
 	
-// Recode ages to a categorical to address age clumping
-	egen age_cat = cut(age), at(0 1 6 12 18 24 30 36 42 48 54 60) // Cut at 0-1 age group, then 6-month age groups after that
+// Recode ages to a categorical to address age heaping
+	egen age_cat = cut(age), at(0 2 4 7 12 24 36 48 60) // Cut at 0-1 months, 2-3 months, 4-6 months, 7-11, then annual after
 	gen age_end = age_cat + 5
 	replace age_end = 5 if age_cat == 1
 	replace age_end = 1 if age_cat == 0
@@ -311,7 +307,7 @@ foreach var of varlist `num_vars' {
 ** Rename variables intelligibly
 
 // Make variable labels a bit more self-explanatory
-	rename (bs1admit rdtadmit hblevel admissiondiag1 finaldiag1) (bs_admit rdt_admit hb_level dx_1_admission dx_1_final)
+	rename (bs1admit rdtadmit hblevel) (bs_admit rdt_admit hb_level)
 
 // Rename signs and symptoms variables to ss_*
 	local ss_vars = "fever cough cough2weeks diffbreath convulsions altconsciousness vomiting unabledrink diarrhea diarrhea2wks bldydiarrhea teaurine"
@@ -357,3 +353,12 @@ foreach var of varlist `num_vars' {
 ** Output data
 cd "$data_dir"
 export delimited using "01_cleaned_data.csv", delimit(",") replace
+
+********************************************************
+** Generate cross-tabs of treatment and diagnosis for committee to examine
+drop dx_match* dx_malaria_final 
+collapse (mean) tr_* dx_*
+rename * mean_*
+gen id = 1
+reshape long mean_, i(id) j(var_name) string
+explort delimited using "01_tr_dx_tab.csv", delimit(",") replace
