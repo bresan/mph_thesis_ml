@@ -361,4 +361,12 @@ collapse (mean) tr_* dx_*
 rename * mean_*
 gen id = 1
 reshape long mean_, i(id) j(var_name) string
-explort delimited using "01_tr_dx_tab.csv", delimit(",") replace
+split var_name, parse("_")
+rename var_name3 diag_code
+replace diag_code = "" if !regexm(var_name,"dx_")
+destring diag_code, replace force
+drop var_name1 var_name2 var_name4
+merge m:1 diag_code using `diagnoses', keep(1 3) nogen
+drop id
+sort diag_code var_name
+export delimited using "01_tr_dx_tab.csv", delimit(",") replace
