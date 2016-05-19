@@ -52,7 +52,7 @@ Purpose: Clean raw PRISM data to prepare for imputation and finally analysis
 // Drop indicators with observed missingness
 	drop immunization pulse1 BP Respirations oxygen height MUAC sicklecell Rbloodsugar otherspecify* 
 
-// Drop other variables not needed for anaysis
+// Drop other variables not needed for analysis
 	drop Death1 Death2 Disability InpatientNo *blood* reason_notgiven Other labtestmissing  
 	
 	// What is Pulse2? caprefil?
@@ -61,10 +61,14 @@ Purpose: Clean raw PRISM data to prepare for imputation and finally analysis
 	// Other extra date variables
 	drop weekyear monthyear 
 	
-// Drop unusable variables (red on variable sheet?)
+// Drop unusable variables (red on variable sheet -- only done after 2012 or 2013)
 	drop Prostration Coma Respiratorydistress AbnormalBleeding Jaudice Haemoglobinuria Convulsions3more circulatorycollapse Pulmonaryoedema ///
 		Acidosis RenalImpairment Hyperlactataemia Hyperparasitemia vomitingeverything Convulsion2less Inabilitytodrinkorbreastfeed lethargicorunconscious /// 
-		coomorbidity CantaccessACTs ACToutofstock unabletoreturn moderatelysick parentalrequest  
+		coomorbidity CantaccessACTs ACToutofstock unabletoreturn moderatelysick parentalrequest
+
+// Remove additional variables with significant systematic missingness prior to or after 2012 or 2013
+	drop HB_desired HB_done skin_pinch Edema severe_wasting sunken_eyes Unablepain ///
+	Lethargy Severeanaemia Hypoglycemia Rhonchi
 
 
 ********************************************************
@@ -226,7 +230,16 @@ drop p_lag_* Treathosp* drugprescribed* TreatmentAdm*
 	drop compmalaria malaria labtestresult
 	rename clinicalmalaria malaria_final // This is the final diagnosis of malaria, rather than the malaria test
 
+// Generate a string variable for temperature
+	replace Temp = . if Temp < 15 | Temp > 50 // These temperatures are impossible (and 99 and 99.9 are missing)
+	gen temp_over35p5 = "No"
+	replace temp_over35p5 = "Yes" if Temp > 35.5 & Temp != .
+	replace temp_over35p5 = "Missing" if Temp == .
+	drop Temp
 	
+// Fix Jaundice coding
+	replace Jaundice = 9 if Jaundice > 9 | (Jaundice >= 2 & Jaundice <= 8) // Supposed to be a 0/1/9 variable
+
 ********************************************************
 ** Recode missing observations to a standard format
 
@@ -235,44 +248,37 @@ drop p_lag_* Treathosp* drugprescribed* TreatmentAdm*
 	describe, replace clear
 	levelsof name if isnumeric == 1, local(num_vars) c
 	restore
-
+	
 	qui {
 		foreach var in `num_vars' {
 			replace `var' = . if inlist(`var',99,9999)
-			replace `var' = . if `var' == 9 & !inlist("`var'","Temp","Weight","MUAC","AdmissionDiag1","BS1admit","RDTadmit","HIV") 
+			replace `var' = . if `var' == 9 & !inlist("`var'","Weight","MUAC","AdmissionDiag1","BS1admit","RDTadmit","HIV") 
 		}
 	}
 	
-// Drop all variables with over half missing values (don't want to even consider imputing them)
-/*
-foreach var of varlist `num_vars' {
-	qui count if `var' == . 
-	if `r(N)' > 50000 drop `var' 
-}
-*/
 
 ********************************************************
 ** Convert binary variables from numeric to categorical indicators
 	// Need to figure out how to subset for binary variables only
-	/*
+	
 	preserve
 	keep `num_vars'
 	collapse (max) `num_vars'
 	local binary_vars = ""
 	foreach var of varlist * {
 		qui count if `var' > 1 & `var' != .
-		if `r(N)' == 0 local binary_vars = "`binary_vars' `var'"
+		if `r(N)' == 0 & !regexm("dx","`var'") & !regexm("tx","`var'") local binary_vars = "`binary_vars' `var'"
 	}
 	restore
 	
-	label define binary 1 "Yes" 0 "No"
+	label define binary 1 "Yes" 0 "No" 9 "Missing"
 	label values `binary_vars' binary
 	foreach var in `binary_vars' {
+		replace `var' = 9 if `var' == .
 		decode `var', gen(str_var)
 		drop `var'
 		rename str_var `var'
 	}
-	*/
 	
 
 ********************************************************
@@ -311,7 +317,7 @@ foreach var of varlist `num_vars' {
 
 // Rename signs and symptoms variables to ss_*
 	local ss_vars = "fever cough cough2weeks diffbreath convulsions altconsciousness vomiting unabledrink diarrhea diarrhea2wks bldydiarrhea teaurine"
-	local ss_vars = "`ss_vars' temp weight pallor severe_wasting sunken_eyes skin_pinch edema jaundice dpbreath flarnostril icrecession subcostal airway wheezing"
+	local ss_vars = "`ss_vars' temp_over35p5 weight pallor severe_wasting sunken_eyes skin_pinch edema jaundice dpbreath flarnostril icrecession subcostal airway wheezing"
 	local ss_vars = "`ss_vars' crackles unconscious lethargy unablesit bgfontanelle unablepain stiffneck kerning rhonchi severeanaemia hypoglycemia disposition" 
 
 // Rename treatment variables to tr_*
