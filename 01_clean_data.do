@@ -317,7 +317,7 @@ drop p_lag_* Treathosp* drugprescribed* TreatmentAdm*
 
 // Rename signs and symptoms variables to ss_*
 	local ss_vars = "fever cough cough2weeks diffbreath convulsions altconsciousness vomiting unabledrink diarrhea diarrhea2wks bldydiarrhea teaurine"
-	local ss_vars = "`ss_vars' temp_over35p5 weight pallor jaundice dpbreath flarnostril icrecession subcostal airway wheezing"
+	local ss_vars = "`ss_vars' temp_under35p5 weight pallor jaundice dpbreath flarnostril icrecession subcostal airway wheezing"
 	local ss_vars = "`ss_vars' crackles unconscious unablesit bgfontanelle stiffneck kerning disposition" 
 
 // Rename treatment variables to tr_*
