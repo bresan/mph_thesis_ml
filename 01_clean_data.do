@@ -79,20 +79,19 @@ Purpose: Clean raw PRISM data to prepare for imputation and finally analysis
 			gen dx_final_`diag' = 0
 			forvalues i = 1/10 {
 				replace dx_admit_`diag' = 1 if AdmissionDiag`i' == `diag'
-				forvalues j = 1/6 {
-					replace dx_match = dx_match + 1 if AdmissionDiag`i' == FinalDiag`j' & AdmissionDiag`i' != . 
-				}
 			}
 			forvalues i = 1/6 {
 				replace dx_final_`diag' = 1 if FinalDiag`i' == `diag'
 			}
+			replace dx_match = dx_match + 1 if dx_admit_`diag' == 1 & dx_final_`diag' == 1
 		}
 		
 		egen dx_admit_count = rowtotal(dx_admit_*)
 		egen dx_final_count = rowtotal(dx_final_*)
 		// Calculate the Jacquard distance between admission and final diagnoses -- essentially,
 		// Number of matching diagnoses divided by number of diagnoses present only in admission or final
-		gen dx_match_dist = dx_match / (dx_admit_count + dx_final_count)
+		gen dx_match_dist = dx_match / (dx_admit_count + dx_final_count - dx_match)
+		sum dx_match_dist
 		
 		// Do we recode diag_match here for 77/88/99 (diagnosis not clear, missing, or other)?
 	}
@@ -195,6 +194,7 @@ drop p_lag_* Treathosp* drugprescribed* TreatmentAdm*
 	keep if age < 60
 	hist age
 	graph export "$data_dir/../graphs/age_dist.pdf", replace
+	cap graph close _all
 	// kdensity age
 	// kdensity age, n(87137) gen(test1 test2) bwidth(6)
 	// replace test1 = 0 if test1 < 0
@@ -327,7 +327,7 @@ foreach var of varlist `num_vars' {
 
 // Rename covariates to cv_*
 	local cv_vars = "readmission gender dateadmit year age admit_duration" 
-	local cv_vars = "`cv_vars'"
+	local cv_vars = "`cv_vars' days site_id "
 
 // Enact renames
 	foreach vartype in ss te dx cv {
@@ -356,17 +356,22 @@ export delimited using "01_cleaned_data.csv", delimit(",") replace
 
 ********************************************************
 ** Generate cross-tabs of treatment and diagnosis for committee to examine
-drop dx_match* dx_malaria_final 
-collapse (mean) tr_* dx_*
-rename * mean_*
-gen id = 1
-reshape long mean_, i(id) j(var_name) string
-split var_name, parse("_")
-rename var_name3 diag_code
-replace diag_code = "" if !regexm(var_name,"dx_")
-destring diag_code, replace force
-drop var_name1 var_name2 var_name4
-merge m:1 diag_code using `diagnoses', keep(1 3) nogen
-drop id
-sort diag_code var_name
-export delimited using "01_tr_dx_tab.csv", delimit(",") replace
+// Generate means
+	drop dx_malaria_final 
+	collapse (mean) tr_* dx_*
+	rename * mean_*
+	gen id = 1
+	reshape long mean_, i(id) j(var_name) string
+	
+// Merge on layperson labels for diagnoses
+	split var_name, parse("_")
+	rename var_name3 diag_code
+	replace diag_code = "" if !regexm(var_name,"dx_")
+	destring diag_code, replace force
+	drop var_name1 var_name2 var_name4
+	merge m:1 diag_code using `diagnoses', keep(1 3) nogen
+	drop id
+	
+// Format and export
+	sort diag_code var_name
+	export delimited using "01_tr_dx_tab.csv", delimit(",") replace
