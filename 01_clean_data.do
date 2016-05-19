@@ -231,6 +231,7 @@ drop p_lag_* Treathosp* drugprescribed* TreatmentAdm*
 	rename clinicalmalaria malaria_final // This is the final diagnosis of malaria, rather than the malaria test
 
 // Generate a string variable for temperature
+// Choose under 35.5 as the indicator to mirror the Mpimbaza risk score paper
 	replace Temp = . if Temp < 15 | Temp > 50 // These temperatures are impossible (and 99 and 99.9 are missing)
 	gen temp_under35p5 = "No"
 	replace temp_under35p5 = "Yes" if Temp <= 35.5 & Temp != .
@@ -239,6 +240,14 @@ drop p_lag_* Treathosp* drugprescribed* TreatmentAdm*
 	
 // Fix Jaundice coding
 	replace Jaundice = 9 if Jaundice > 9 | (Jaundice >= 2 & Jaundice <= 8) // Supposed to be a 0/1/9 variable
+	
+// Generate a string variable for HB level
+// Use under 70 g/L as the cutoff for severe anemia in children 6-59 months of age according to WHO
+	gen hb_under7 = "No"
+	replace hb_under7 = "Yes" if HBlevel < 7
+	replace hb_under7 = "Missing" if HBlevel == 31
+	drop HBlevel
+
 
 ********************************************************
 ** Recode missing observations to a standard format
@@ -267,7 +276,7 @@ drop p_lag_* Treathosp* drugprescribed* TreatmentAdm*
 	local binary_vars = ""
 	foreach var of varlist * {
 		qui count if `var' > 1 & `var' != .
-		if `r(N)' == 0 & !regexm("dx","`var'") & !regexm("tx","`var'") local binary_vars = "`binary_vars' `var'"
+		if `r(N)' == 0 & !regexm("`var'","dx") & !regexm("`var'","tr") local binary_vars = "`binary_vars' `var'"
 	}
 	restore
 	
@@ -313,7 +322,7 @@ drop p_lag_* Treathosp* drugprescribed* TreatmentAdm*
 ** Rename variables intelligibly
 
 // Make variable labels a bit more self-explanatory
-	rename (bs1admit rdtadmit hblevel) (bs_admit rdt_admit hb_level)
+	rename (bs1admit rdtadmit) (bs_admit rdt_admit)
 
 // Rename signs and symptoms variables to ss_*
 	local ss_vars = "fever cough cough2weeks diffbreath convulsions altconsciousness vomiting unabledrink diarrhea diarrhea2wks bldydiarrhea teaurine"
@@ -325,7 +334,7 @@ drop p_lag_* Treathosp* drugprescribed* TreatmentAdm*
 	local tr_vars = "" // Duplicative of existing treatment data?
 
 // Rename testing variables to te_*
-	local te_vars = "bs_admit rdt_admit hb_desired hb_done hb_level hiv malaria_test" 
+	local te_vars = "bs_admit rdt_admit hb_under7 hiv malaria_test" 
 	local te_vars = "`te_vars'"
 
 // Rename extra diagnosis variables to dx_*
