@@ -216,10 +216,10 @@ drop p_lag_* Treathosp* drugprescribed* TreatmentAdm*
 	rename age_cat age
 
 // Generate a string variable for anti-malarial treatment
-	gen tx_anti_malarial = ""
-	replace tx_anti_malarial = "none" if quinineother == 0
-	replace tx_anti_malarial = "quinine" if quinineother == 1 
-	replace tx_anti_malarial = "other" if quinineother == 2
+	gen tr_anti_malarial = ""
+	replace tr_anti_malarial = "none" if quinineother == 0
+	replace tr_anti_malarial = "quinine" if quinineother == 1 
+	replace tr_anti_malarial = "other" if quinineother == 2
 	drop anyantimalarial otherantimalarial quinine*
 	
 // Generate a string variable for malaria test result (and then complicated or not)
@@ -372,7 +372,7 @@ export delimited using "01_cleaned_data.csv", delimit(",") replace
 ********************************************************
 ** Generate cross-tabs of treatment and diagnosis for committee to examine
 // Generate means
-	drop dx_malaria_final 
+	drop dx_malaria_final tr_anti_malarial
 	collapse (mean) tr_* dx_*
 	rename * mean_*
 	gen id = 1
