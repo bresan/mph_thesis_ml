@@ -232,9 +232,9 @@ drop p_lag_* Treathosp* drugprescribed* TreatmentAdm*
 
 // Generate a string variable for temperature
 	replace Temp = . if Temp < 15 | Temp > 50 // These temperatures are impossible (and 99 and 99.9 are missing)
-	gen temp_over35p5 = "No"
-	replace temp_over35p5 = "Yes" if Temp > 35.5 & Temp != .
-	replace temp_over35p5 = "Missing" if Temp == .
+	gen temp_under35p5 = "No"
+	replace temp_under35p5 = "Yes" if Temp <= 35.5 & Temp != .
+	replace temp_under35p5 = "Missing" if Temp == .
 	drop Temp
 	
 // Fix Jaundice coding
@@ -317,8 +317,8 @@ drop p_lag_* Treathosp* drugprescribed* TreatmentAdm*
 
 // Rename signs and symptoms variables to ss_*
 	local ss_vars = "fever cough cough2weeks diffbreath convulsions altconsciousness vomiting unabledrink diarrhea diarrhea2wks bldydiarrhea teaurine"
-	local ss_vars = "`ss_vars' temp_over35p5 weight pallor severe_wasting sunken_eyes skin_pinch edema jaundice dpbreath flarnostril icrecession subcostal airway wheezing"
-	local ss_vars = "`ss_vars' crackles unconscious lethargy unablesit bgfontanelle unablepain stiffneck kerning rhonchi severeanaemia hypoglycemia disposition" 
+	local ss_vars = "`ss_vars' temp_over35p5 weight pallor jaundice dpbreath flarnostril icrecession subcostal airway wheezing"
+	local ss_vars = "`ss_vars' crackles unconscious unablesit bgfontanelle stiffneck kerning disposition" 
 
 // Rename treatment variables to tr_*
 // No need to recode tr_admit and tr_hosp variables because they're already correctly formatted
