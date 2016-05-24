@@ -14,9 +14,9 @@ formulas <- as.formula(paste("death~",paste(pred_vars,collapse="+")))
 
 #####################################################
 ## Try to make a decision tree
-run_dtree1 <- function(data,death_weight=1) {
+run_dtree1 <- function(data,formula,death_weight=1) {
   ## Create a regression tree using rpart
-  fit <- rpart(formulas,data=data.frame(data),control=rpart.control(minsplit=2, minbucket=1, cp=0.0007,maxdepth=5))
+  fit <- rpart(formula,data=data.frame(data),control=rpart.control(minsplit=2, minbucket=1, cp=0.0007,maxdepth=5))
   fit <- rpart(death~.,data=data.frame(data))
   summary(fit)
   printcp(fit)
@@ -24,6 +24,7 @@ run_dtree1 <- function(data,death_weight=1) {
   plot(fit, uniform=T)
   text(fit,use.n=T,all=T,cex=.8)
 }
+
 run_dtree2 <- function(data,death_weight=1) {
   ## Another dtree using maptree
   library(maptree)

@@ -100,10 +100,28 @@ Purpose: Clean raw PRISM data to prepare for imputation and finally analysis
 		// Do we recode diag_match here for 77/88/99 (diagnosis not clear, missing, or other)?
 	}
 	
-	// How do the diagnoses stack up against death?
-	tab dx_match anydeath, row
-	
 	drop AdmissionDiag* FinalDiag*
+	
+// Keep only the top 20 diagnoses for admission and final, since they make up a significant portion of the total diagnoses given
+	preserve
+	gen total_admissions = 1
+	drop *count
+	collapse (sum) total_admissions dx_admit* dx_final*
+	reshape long dx_, i(total_admissions) j(diag_var) string
+	rename dx_ dx_admissions
+	gen admit_type = "admit" if regexm(diag_var,"admit")
+	replace admit_type = "final" if regexm(diag_var,"final")
+	gsort admit_type -dx_admissions
+	by admit_type: gen diag_order = _n 
+	replace diag_var = "dx_" + diag_var
+	levelsof diag_var if diag_order > 20, local(drop_vars) c // If it's not one of the top-20 diagnoses, drop it
+	gen diag_rate = dx_admissions/total_admissions
+	keep diag_var dx_admissions total_admissions diag_rate diag_order
+	order diag_var dx_admissions total_admissions diag_rate diag_order
+	export delimited using "$data_dir/01_diagnosis_counts.csv", delimit(",") replace
+	restore 
+	
+	drop `drop_vars'
 	
 	
 // What treatment was given in the hospital? Was it given at admission or not?
@@ -247,6 +265,18 @@ drop p_lag_* Treathosp* drugprescribed* TreatmentAdm*
 	replace hb_under7 = "Yes" if HBlevel < 7
 	replace hb_under7 = "Missing" if HBlevel == 31
 	drop HBlevel
+	
+// Generate a string variable for Pallor
+	gen pallor_string = ""
+	replace pallor_string = "None" if Pallor == 0
+	replace pallor_string = "Mild or Moderate" if Pallor == 1
+	replace pallor_string = "Severe" if Pallor == 2
+	replace pallor_string = "Missing" if Pallor == . // For some reason it has a lot of over-2 numbers, assume missing
+	drop Pallor
+	rename pallor_string Pallor
+	
+// Recode random missings
+	replace AltConsciousness = . if AltConsciousness == 11
 
 
 ********************************************************
@@ -267,16 +297,14 @@ drop p_lag_* Treathosp* drugprescribed* TreatmentAdm*
 	
 
 ********************************************************
-** Convert binary variables from numeric to categorical indicators
-	// Need to figure out how to subset for binary variables only
-	
+** Convert binary variables from numeric to categorical indicators	
 	preserve
 	keep `num_vars'
 	collapse (max) `num_vars'
 	local binary_vars = ""
 	foreach var of varlist * {
 		qui count if `var' > 1 & `var' != .
-		if `r(N)' == 0 & !regexm("`var'","dx") & !regexm("`var'","tr") local binary_vars = "`binary_vars' `var'"
+		if `r(N)' == 0 & substr("`var'",1,2) != "dx" & substr("`var'",1,2) != "tr" local binary_vars = "`binary_vars' `var'"
 	}
 	restore
 	
@@ -327,7 +355,7 @@ drop p_lag_* Treathosp* drugprescribed* TreatmentAdm*
 // Rename signs and symptoms variables to ss_*
 	local ss_vars = "fever cough cough2weeks diffbreath convulsions altconsciousness vomiting unabledrink diarrhea diarrhea2wks bldydiarrhea teaurine"
 	local ss_vars = "`ss_vars' temp_under35p5 weight pallor jaundice dpbreath flarnostril icrecession subcostal airway wheezing"
-	local ss_vars = "`ss_vars' crackles unconscious unablesit bgfontanelle stiffneck kerning disposition" 
+	local ss_vars = "`ss_vars' crackles unconscious unablesit bgfontanelle stiffneck kerning" 
 
 // Rename treatment variables to tr_*
 // No need to recode tr_admit and tr_hosp variables because they're already correctly formatted
@@ -357,6 +385,9 @@ drop p_lag_* Treathosp* drugprescribed* TreatmentAdm*
 
 // Rename outcome variable to death (also have malariadeath as another potential outcome)
 	rename anydeath death
+	
+// Drop malariadeath and disposition variables (these are outcomes, but not the primary ones of interest)
+	drop disposition malariadeath
 	
 // Output a cleaned variable list
 	preserve

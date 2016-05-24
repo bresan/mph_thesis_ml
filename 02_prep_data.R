@@ -27,12 +27,15 @@ require(ggplot2) # For graphing
 # data <- data.table(read.dta13(paste0(data_dir,"/IP data base Nov 2015_Grant Nguyen_3rd Nov 2016.dta")))
 # data <- data.table(read_dta(paste0(data_dir,"/IP data base Nov 2015_Grant Nguyen_Version 2013.dta")))
 
-master_data <- data.table(fread(paste0(data_dir,"/01_cleaned_data.csv")))
+master_data <- data.table(fread(paste0(data_dir,"/01_cleaned_data.csv"),stringsAsFactors=T))
+
+## Remove all data that has missing deaths
+master_data <- master_data[death!="Missing",]
 
 
 #####################################################
 ## Classify variables appropriately
-death_vars <- c("death","malariadeath")
+death_vars <- c("death")
 data_stubs <- substr(names(master_data),1,2)
 dx_vars <- names(master_data)[data_stubs == "dx"]
 ss_vars <- names(master_data)[data_stubs == "ss"]
@@ -51,10 +54,13 @@ if(length(uncat_vars) > 0) {
 #####################################################
 ## Prepare for random forest and logistic regression
 predict_vars <- c(dx_vars,ss_vars,cv_vars,te_vars,tr_vars)
+pred_formula <- as.formula(paste("death~",paste(predict_vars,collapse="+")))
 outcome_vars <- "death"
 
 ## Generate a test dataset with only signs and symptoms and 5000 random observations, for easier testing of methods
 test_predict_vars <- ss_vars
+test_formula <- as.formula(paste("death~",paste(test_predict_vars,collapse="+")))
+
 set.seed(9840294)
 test_data <- copy(master_data[,.SD,.SDcols=c(test_predict_vars,outcome_vars)]) 
 test_data[,sort_obs:=rnorm(nrow(test_data))]
