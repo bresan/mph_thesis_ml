@@ -43,7 +43,7 @@ run_dtree <- function(data,formula,death_weight=10) {
   data_new[death=="No",weight:=1]
   data_new[death=="Yes",weight:=death_weight]
   
-  fit <- rpart(formula,data=data.frame(data),control=rpart.control(),weights=weight)
+  fit <- rpart(formula,data=data.frame(data_new),control=rpart.control(),weights=weight)
   # fit <- rpart(death~.,data=data.frame(data_new))
   summary(fit)
   printcp(fit)
@@ -68,13 +68,11 @@ run_dtree3 <- function(data,formula,death_weight=1) {
   tr.pred = predict(ct,newdata=data,type="prob")
 }
 run_dtree3(data=test_data,formula=test_formula,death_weight=10)
-run_dtree3(data=master_data,formula=pred_formula,death_weight=10)
+# system.time(run_dtree3(data=master_data,formula=pred_formula,death_weight=10))
 
 ## Random Forests
 ## Results: 
 run_rf <- function(data,num_trees,formula,sample_weights) {
-  data_new <- data
-  char_vars <- names(data)[
   require(randomForest)
   rfImpute(death~.,data.frame(data)) # Trying to impute data...
   rf_fit <- randomForest(formula,data=data.frame(data),ntree=num_trees,keep.forest=F,importance=T)

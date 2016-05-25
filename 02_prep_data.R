@@ -27,7 +27,7 @@ require(ggplot2) # For graphing
 # data <- data.table(read.dta13(paste0(data_dir,"/IP data base Nov 2015_Grant Nguyen_3rd Nov 2016.dta")))
 # data <- data.table(read_dta(paste0(data_dir,"/IP data base Nov 2015_Grant Nguyen_Version 2013.dta")))
 
-master_data <- data.table(fread(paste0(data_dir,"/01_cleaned_data.csv"),stringsAsFactors=T))
+master_data <- data.table(fread(paste0(data_dir,"/01_cleaned_data.csv")))
 
 ## Remove all data that has missing deaths
 master_data <- master_data[death!="Missing",]
@@ -68,6 +68,18 @@ test_data <- test_data[order(sort_obs)]
 test_data <- test_data[1:5000,]
 test_data[,sort_obs:=NULL]
 
+## Convert both datasets' characters to factor variables
+## We do this here to avoid the test data from having factor levels that don't actually exist in the test dataset 
+convert_factors <- function(dt) {
+  char_cols <- names(dt[,.SD,.SDcols=sapply(dt,is.character)])
+  fac_dt <- dt[,lapply(.SD,as.factor),.SDcols=char_cols]
+  dt[,c(char_cols):=NULL]
+  dt <- cbind(dt,fac_dt)
+  return(dt)
+}
+
+master_data <- convert_factors(master_data) 
+test_data <- convert_factors(test_data)
 
 #####################################################
 ## Output data objects to feed into random forest and logistic regression
