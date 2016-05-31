@@ -32,6 +32,8 @@ master_data <- data.table(fread(paste0(data_dir,"/01_cleaned_data.csv")))
 ## Remove all data that has missing deaths
 master_data <- master_data[death!="Missing",]
 
+## Drop weight for now, until I can figure out how/whether to use it
+master_data[,ss_weight:=NULL]
 
 #####################################################
 ## Classify variables appropriately
@@ -70,16 +72,26 @@ test_data[,sort_obs:=NULL]
 
 ## Convert both datasets' characters to factor variables
 ## We do this here to avoid the test data from having factor levels that don't actually exist in the test dataset 
+
+## Add here thing to not do this if all the varnames are characters
 convert_factors <- function(dt) {
   char_cols <- names(dt[,.SD,.SDcols=sapply(dt,is.character)])
-  fac_dt <- dt[,lapply(.SD,as.factor),.SDcols=char_cols]
-  dt[,c(char_cols):=NULL]
-  dt <- cbind(dt,fac_dt)
+  print(length(char_cols))
+  if(length(char_cols) > 0 & length(char_cols) != length(names(dt))) {
+    fac_dt <- dt[,lapply(.SD,as.factor),.SDcols=char_cols]
+    dt[,c(char_cols):=NULL]
+    dt <- cbind(dt,fac_dt)
+  } else if(length(char_cols)==length(names(dt))) {
+    dt <- dt[,lapply(.SD,as.factor),.SDcols=char_cols]
+  }
   return(dt)
 }
 
 master_data <- convert_factors(master_data) 
 test_data <- convert_factors(test_data)
+
+## 
+
 
 #####################################################
 ## Output data objects to feed into random forest and logistic regression

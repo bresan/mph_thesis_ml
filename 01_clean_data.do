@@ -275,6 +275,12 @@ drop p_lag_* Treathosp* drugprescribed* TreatmentAdm*
 	drop Pallor
 	rename pallor_string Pallor
 	
+// Generate a string variable for Airway
+	tostring Airway, replace
+	replace Airway = "Clear" if inlist(Airway,"0","1") // Assume that 0 means clear airway, and was just miscoded
+	replace Airway = "Strider" if inlist(Airway,"2")
+	replace Airway = "Missing" if inlist(Airway,"9")
+	
 // Recode random missings
 	replace AltConsciousness = . if AltConsciousness == 11
 
