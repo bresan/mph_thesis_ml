@@ -59,7 +59,7 @@ Purpose: Clean raw PRISM data to prepare for imputation and finally analysis
 	drop Pulse2 caprefil BCS NoHBwhy BloodGroup BldRH  // Pulse2 13,277 non-missing, caprefil 38,654 non-missing, BCS (Blantyre Coma Score) 27,207 non-missing, BloodGroup 14,542 non-missing, BldRH 11,510 non-missing
 	
 	// Other extra date variables
-	drop weekyear monthyear 
+	drop weekyear 
 	
 // Drop unusable variables (red on variable sheet -- only done after 2012 or 2013)
 	drop Prostration Coma Respiratorydistress AbnormalBleeding Jaudice Haemoglobinuria Convulsions3more circulatorycollapse Pulmonaryoedema ///
@@ -384,7 +384,7 @@ drop p_lag_* Treathosp* drugprescribed* TreatmentAdm*
 	local dx_vars = "malaria_final"
 
 // Rename covariates to cv_*
-	local cv_vars = "readmission gender dateadmit year age" 
+	local cv_vars = "readmission gender monthyear year age" 
 	local cv_vars = "`cv_vars' site_id "
 
 // Enact renames
@@ -403,6 +403,9 @@ drop p_lag_* Treathosp* drugprescribed* TreatmentAdm*
 	
 // Drop malariadeath and disposition variables (these are outcomes, but not the primary ones of interest)
 	drop disposition malariadeath
+	
+// Drop dateadmit because it's too wide -- will rely on monthyear
+	drop dateadmit
 	
 // Output a cleaned variable list
 	preserve

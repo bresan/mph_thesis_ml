@@ -35,6 +35,9 @@ master_data <- master_data[death!="Missing",]
 ## Drop weight for now, until I can figure out how/whether to use it
 master_data[,ss_weight:=NULL]
 
+## Drop monthyear for now as well -- it seems to carry undue weight re: Death
+master_data[,cv_monthyear:=NULL]
+
 #####################################################
 ## Classify variables appropriately
 death_vars <- c("death")
@@ -60,7 +63,7 @@ pred_formula <- as.formula(paste("death~",paste(predict_vars,collapse="+")))
 outcome_vars <- "death"
 
 ## Generate a test dataset with only signs and symptoms and 5000 random observations, for easier testing of methods
-test_predict_vars <- ss_vars
+test_predict_vars <- predict_vars
 test_formula <- as.formula(paste("death~",paste(test_predict_vars,collapse="+")))
 
 set.seed(9840294)
