@@ -95,6 +95,7 @@ Purpose: Clean raw PRISM data to prepare for imputation and finally analysis
 		// Calculate the Jacquard distance between admission and final diagnoses -- essentially,
 		// Number of matching diagnoses divided by number of diagnoses present only in admission or final
 		gen dx_match_dist = dx_match / (dx_admit_count + dx_final_count - dx_match)
+		replace dx_match_dist = 0 if dx_match_dist == . // If the denominator is 0, this means that there were no diagnoses at admission or discharge
 		sum dx_match_dist
 		
 		// Do we recode diag_match here for 77/88/99 (diagnosis not clear, missing, or other)?
@@ -202,6 +203,14 @@ drop p_lag_* Treathosp* drugprescribed* TreatmentAdm*
 
 	gen admit_duration = date(Datedischarge,"YMD###") - dateadmit
 	replace admit_duration = . if admit_duration < 0 | admit_duration > 365 // Consider these outliers and treat them as missing
+	
+	// Examine differences in Days length-of-stay variable and admit_duration LOS variable
+	sum Days admit_duration if Days != . & admit_duration != .
+	count if Days != admit_duration & Days != .
+	count if Days == 0
+	count if admit_duration == 0
+	
+	drop Days admit_duration // Drop the LOS variables for now since they are quite discrepant
 	
 // Fix ages -- variable age is in months, along with significant heaping to major age values
 // Other age variables available -- year, month, day
@@ -375,8 +384,8 @@ drop p_lag_* Treathosp* drugprescribed* TreatmentAdm*
 	local dx_vars = "malaria_final"
 
 // Rename covariates to cv_*
-	local cv_vars = "readmission gender dateadmit year age admit_duration" 
-	local cv_vars = "`cv_vars' days site_id "
+	local cv_vars = "readmission gender dateadmit year age" 
+	local cv_vars = "`cv_vars' site_id "
 
 // Enact renames
 	foreach vartype in ss te dx cv {

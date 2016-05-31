@@ -72,8 +72,6 @@ test_data[,sort_obs:=NULL]
 
 ## Convert both datasets' characters to factor variables
 ## We do this here to avoid the test data from having factor levels that don't actually exist in the test dataset 
-
-## Add here thing to not do this if all the varnames are characters
 convert_factors <- function(dt) {
   char_cols <- names(dt[,.SD,.SDcols=sapply(dt,is.character)])
   print(length(char_cols))
@@ -90,7 +88,28 @@ convert_factors <- function(dt) {
 master_data <- convert_factors(master_data) 
 test_data <- convert_factors(test_data)
 
-## 
+## Check for missing variables in dataset (random forests do not do well with missing observations
+## Solution: Convert to character and label as informative missing
+check_missing <- function(dt) {
+  num_cols <- names(dt[,.SD,.SDcols=sapply(dt,is.numeric)])
+  if(length(num_cols) > 0) {
+    miss_dt <- dt[,lapply(.SD,function(x) sum(is.na(x))),.SDcols=num_cols]
+    miss_dt[,id:=1]
+    miss_dt <- melt(miss_dt,id.vars="id",measure.vars=num_cols,value.name="num_missing")
+    miss_vars <- unique(miss_dt[num_missing>0,as.character(variable)])
+    miss_dt[,id:=NULL]
+  } else miss_vars <- NULL
+  
+  if(length(miss_vars) > 0) {
+    print(paste0("The following variables have missing values: "))
+    print(miss_dt[num_missing>0,])
+  } else {
+    print(paste0("No variables with missing values present in the dataset"))
+  }
+}
+
+check_missing(master_data)
+check_missing(test_data)
 
 
 #####################################################
