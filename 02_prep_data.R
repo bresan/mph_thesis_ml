@@ -114,6 +114,44 @@ check_missing <- function(dt) {
 check_missing(master_data)
 check_missing(test_data)
 
+## Create a correlation plot across variables
+## Current issue: Most variables are categorical rather than numeric, makes cor function not work
+
+## Currently, this only returns p values for each var, not var-var combinations. Why? Because combinations aren't looped both ways?
+# pos_dim <- dim(master_data)[2]
+# neg_dim <- (-1 * pos_dim)
+#             
+# mapply(function(x, y) chisq.test(x, y)$p.value, data.frame(master_data)[,neg_dim], MoreArgs=list(data.frame(master_data)[,pos_dim]))
+
+# This seems to return nulls for everything -- try chisq on 1x1 combos before getting more fancy
+# chisq.test(table(master_data[,te_bs_admit],master_data[,dx_admit_50]))
+# library(plyr)
+# 
+# combos <- combn(ncol(Dat),2)
+# 
+# chisq_results <- adply(combos, 2, function(x) {
+#   test <- tryCatch(chisq.test(Dat[, x[1]], Dat[, x[2]]),
+#                    error= function(err) {
+#                      print(paste0("One of these columns has no variance in obs"))
+#                      print(names(Dat[,c(x[1],x[2])))
+#                      err_frame <- data.frame(parameter=NA,statistic=NA,p.value=NA)
+#                      return(err_frame)
+#                     })
+#   
+#   out <- data.frame("Row" = colnames(Dat)[x[1]]
+#                     , "Column" = colnames(Dat[x[2]])
+#                     , "Chi.Square" = round(test$statistic,3)
+#                     ,  "df"= test$parameter
+#                     ,  "p.value" = round(test$p.value, 3)
+#   )
+#   return(out)
+# })  
+
+## Note that this doesn't account for multiple testing (but since this is descriptive, doesn't matter)
+## This needs a correlation matrix when what we have is a set of chi squared results
+# corrplot.mixed(cor(data.frame(data)), lower="circle", upper="color", 
+#                tl.pos="lt", diag="n", order="hclust", hclust.method="complete")
+
 
 #####################################################
 ## Output data objects to feed into random forest and logistic regression
