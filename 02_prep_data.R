@@ -17,8 +17,8 @@ data_dir <- paste0(master_dir,"/data")
 
 #####################################################
 ## Set Packages
-require(data.table) # For easy data management
-require(ggplot2) # For graphing
+library(data.table) # For easy data management
+library(ggplot2) # For graphing
 
 
 #####################################################

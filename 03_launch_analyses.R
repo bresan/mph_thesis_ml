@@ -14,7 +14,7 @@ rep_fold_combos <- expand.grid(c(1:max_reps),c(1:max_folds))
 
 ########################################################
 ## Pull in functions and create repetition-cv map
-require(data.table)
+library(data.table)
 
 ## Define qsub function to submit jobs to the cluster
 qsub <- function(jobname, code, hold=NULL, pass=NULL, slots=1, submit=F, log=T, proj = "") { 

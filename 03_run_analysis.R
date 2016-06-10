@@ -12,14 +12,14 @@ if(Sys.info()[1] =="Windows") {
   rep_num <- 1      # The repetition number used for the cross-validation (10 repetitions of 10-fold CV), used as a unique seed for each rep
   fold_num <- 10    # The fold number that we should extract from the 10-fold CV to use as a holdout
   tot_folds <- 10   # The total number of folds that we are running (to make sure we specify the correct value for k in createFolds)
-} else if (Sys.info()[1] == "Macintosh") {
+} else if (Sys.info()[1] == "Darwin") { # Macintosh
   master_dir <- "/Users/Grant/Desktop/Thesis"
   code_dir <- paste0(master_dir,"/code")
   
   rep_num <- 1
   fold_num <- 10
   tot_folds <- 10
-} else if (SYs.info()[1] == "Unix") {
+} else if (Sys.info()[1] == "Unix") {
   master_dir <- "/Users/Grant/Desktop/Thesis"
   code_dir <- paste0(master_dir,"/code")
   
@@ -33,9 +33,9 @@ data_dir <- paste0(master_dir,"/data")
 
 #####################################################
 ## Set Packages
-require(data.table) # For easy data management
-require(ggplot2) # For graphing
-require(caret) # To create folds for each repetition of k-fold cross-validation
+library(data.table) # For easy data management
+library(ggplot2) # For graphing
+library(caret) # To create folds for each repetition of k-fold cross-validation
 
 ## Import analysis functions
 source(paste0(code_dir,"/analysis_functions.R"))
@@ -63,9 +63,9 @@ test_data <- master_data[holdouts]
 
 ## Results: Creates tree, but unclear results at the moment.
   run_dtree <- function(data,formula,death_weight=10) {
-    require(rpart)
+    library(rpart)
     ## Create a regression tree using rpart
-    data_new <- data
+    data_new <- copy(data)
     data_new[death=="No",weight:=1]
     data_new[death=="Yes",weight:=death_weight]
     
@@ -79,14 +79,14 @@ test_data <- master_data[holdouts]
     return(list(rt_fit, rt_pred))
   }
   
-  dt_results <- run_dtree(data=train_data,formula=test_formula,death_weight=5)
+  system.time(dt_results <- run_dtree(data=train_data,formula=test_formula,death_weight=10))
   dt_fit <- dt_results[1][[1]]
   dt_preds <- dt_results[2][[1]]
 
 ## Results: Interesting results on unconsciousness being very bad, deep breathing yes can be bad if no cough, and pallor can be bad if missing and no deep breathing or missing
   run_ctree <- function(data,formula,death_weight=1) {
     ## Use party package
-    require(party)
+    library(party)
     data_new <- data
     data_new[death=="No",weight:=1]
     data_new[death=="Yes",weight:=death_weight]
@@ -97,15 +97,16 @@ test_data <- master_data[holdouts]
     ct_pred <- do.call(rbind,ct_pred) # Convert from a list of lists to a matrix
     return(list(ct_fit,ct_pred))
   }
-  ct_results <- run_ctree(data=train_data,formula=test_formula,death_weight=10)
+  system.time(ct_results <- run_ctree(data=train_data,formula=test_formula,death_weight=10))
 
   ct_fit <- ct_results[1][[1]]
   ct_preds <- ct_results[2][[1]]
 
 
 ## Random Forests
+## Roughly 30 seconds per tree -> 4 hours for 500 trees, etc.
   run_rf <- function(data,num_trees,formula,sample_weights) {
-    require(randomForest)
+    library(randomForest)
 #     rfImpute(death~.,data.frame(data)) # Trying to impute data...
     rf_fit <- randomForest(formula,data=data.frame(data),ntree=num_trees,replace=T,keep.forest=T,importance=T,classwt=c(1,sample_weights))
     
@@ -118,32 +119,55 @@ test_data <- master_data[holdouts]
     return(list(rf_fit,rf_pred))
   }
 
-  rf_results <- run_rf(data=train_data,num_trees=500,formula=test_formula,sample_weights=5)
+  system.time(rf_results <- run_rf(data=train_data,num_trees=1,formula=test_formula,sample_weights=5))
   rf_fit <- rf_results[1][[1]]
   rf_preds <- rf_results[2][[1]]
 
+  VarImpPlot(rf_fit) ## Is this how you do it?
+
 
 ## Gradient Boosting Machines
-  require(xgboost); require(Matrix)
+## Roughly XX seconds per tree -> __ hours for __ trees, etc.
 
-  run_boost <- function(data) {
-    sparse_matrix <- sparse.model.matrix(death~.-1, data=data.frame(data))
-    y <- data[,as.integer(death)]
-    input_data <- xgb.DMatrix(sparse_matrix)
-    boost_fit = xgb.train(data=input_data,label=y,nrounds=5,nfold=3)
+  library(xgboost); library(Matrix)
+  library(Ckmeans.1d.dp) ## Needed for xgb.plot.importance
+  library(DiagrammeR) ## Needed for xgb.plot.tree
+
+  run_boost <- function(tr_data,te_data) {
+    xgb_features <- names(tr_data)[names(tr_data) != "death"]
+    sparse_train <- sparse.model.matrix(death~.-1, data=data.frame(tr_data))
+    sparse_test <- sparse.model.matrix(death~.-1, data=data.frame(te_data))
+    y <- tr_data[,as.numeric(death == "Yes")]
+    input_data <- xgb.DMatrix(sparse_train)
+    # This only works with sparse_matrix but not the DMatrix -- not really sure what's going on here
+    # See http://stackoverflow.com/questions/37057326/grid-tuning-xgboost-with-missing-data for another case of this
+    boost_fit = xgboost(data=sparse_train,label=y,nrounds=5,nfold=3) 
+    
     print(summary(boost_fit))
-    boost_pred = predict(boost_fit,newdata=data[,death],
-                        n.trees=5000)
-    return(list(boost_fit,boost_pred))
+    importance <- xgb.importance(feature_names = xgb_features, model = boost_fit)
+    print(importance)
+    
+    ## Pull out top 20 important factors
+#     print(xgb.plot.tree(feature_names= xgb_features, model = boost_fit))
+    
+    boost_pred = predict(boost_fit,newdata=sparse_test)
+    return(list(boost_fit,boost_pred,importance))
   }
   
-  gb_results <- run_boost(data=test_data)
+  system.time(gb_results <- run_boost(tr_data=train_data,te_data=test_data))
   gb_fit <- gb_results[1][[1]]
   gb_preds <- gb_results[2][[1]]
 
+  ## Print GB importance
+  gb_imp <- gb_results[3][[1]]
+  gb_imp <- gb_imp[order(-gb_imp$Gain),]
+  gb_imp2 <- gb_imp[1:20,]
+
+  print(xgb.plot.importance(gb_imp2))
+
 
 ## 10-fold CV Random Forests and Gradient Boosting Machines
-#   require(caret); require(e1071)
+#   library(caret); library(e1071)
 #   ctrl = trainControl(method="repeatedcv", number=10, repeats=5)
 #   trf = train(test_formula, data=test_data, method="rf", metric="Kappa",
 #               trControl=ctrl)
@@ -163,7 +187,7 @@ test_data <- master_data[holdouts]
   ## Plot ROC curves
   test_data[,death_test:=as.numeric(death)-1] # Factor var is 1 for alive, 2 for dead -- convert to 0 for alive, 1 for dead
 
-  require(ROCR)
+  library(ROCR)
   pred_forest = prediction(rf_preds[,2],test_data[,death_test])
   perf_forest = performance(pred_forest,"tpr","fpr")
 
