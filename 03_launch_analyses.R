@@ -119,7 +119,7 @@ files <- paste0("results_",rep_fold_combos$Var1,"_",rep_fold_combos$Var2,".csv")
 compiled_results <- data.table(rbindlist(lapply(files,function(x) fread(x))))
 
 ## Determine the best method based on all of the CV runs
-summary_results <- compiled_results[,list(mean_acc = mean(accuracy), sd_acc = sd(accuracy), mean_auc = mean(auc)), by=list(mdoel_type)]
+summary_results <- compiled_results[,list(mean_acc = mean(accuracy), sd_acc = sd(accuracy), mean_auc = mean(auc)), by=list(model_type)]
 
 ## Output compiled results and summary metrics
 write.csv(compiled_results,paste0(out_dir,"/compiled_results.csv"),row.names=F)
