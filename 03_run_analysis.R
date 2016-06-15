@@ -44,7 +44,7 @@ library(caret) # To create folds for each repetition of k-fold cross-validation
 source(paste0(code_dir,"/analysis_functions.R"))
 
 ## Set seed for reproducibility, toggled by repetition number
-set.seed(rep_num)
+set.seed(paste0(rep_num,"99",fold_num,"99",death_wt))
 
 ####################################################
 ## Import data
@@ -186,11 +186,11 @@ test_data <- master_data[holdouts]
   test_data[,death_test:=as.numeric(death)-1] # Factor var is 1 for alive, 2 for dead -- convert to 0 for alive, 1 for dead
 
   library(ROCR)
-  pred_dtree <- prediction(dt_preds[,2],test_data[,death_test])
-  perf_dtree = performance(pred_dtree,"tpr","fpr")
+  pred_dt <- prediction(dt_preds[,2],test_data[,death_test])
+  perf_dt = performance(pred_dt,"tpr","fpr")
 
-  pred_ctree = prediction(ct_preds[,2],test_data[,death_test])
-  perf_ctree = performance(pred_ctree,"tpr","fpr")
+  pred_ct = prediction(ct_preds[,2],test_data[,death_test])
+  perf_ct = performance(pred_ct,"tpr","fpr")
 
   pred_rf <- prediction(rf_preds[,2],test_data[,death_test])
   perf_rf <- performance(pred_rf,"tpr","fpr")
@@ -199,8 +199,8 @@ test_data <- master_data[holdouts]
   perf_gb <- performance(pred_gb,"tpr","fpr")
 
   ## Plot ROC curves of predictions
-  plot(perf_dtree, main="ROC", col="red")
-  plot(perf_ctree, col="blue",add=T)
+  plot(perf_dt, main="ROC", col="red")
+  plot(perf_ct, col="blue",add=T)
   plot(perf_rf, col="green",add=T)
   plot(perf_gb, col="brown",add=T)
   abline(a=0,b=1)
@@ -210,18 +210,36 @@ test_data <- master_data[holdouts]
          col = c("red","blue","green","brown"))
 
   ## Calculate AUC
-  auc.perf = performance(pred_dtree, measure = "auc")
-  auc_dtree <- auc.perf@y.values
-  print(paste0("AUC of Random Forest is ",auc_dtree))
+  calc_auc <- function(pred_method) {
+    library(ROCR)
+    auc_perf <- performance(get(paste0("pred_",pred_method)),measure="auc")
+    auc <- unlist(auc_perf@y.values)
+    auc_dt <- data.table(pred_method,auc)
+    return(auc_dt)
+  }
 
-  auc.perf = performance(pred_ctree, measure = "auc")
-  auc_ctree <- auc.perf@y.values
-  print(paste0("AUC of Conditional Tree is ",auc_ctree))
+  methods <- c("dt","ct","rf","gb")
+  auc_results <- rbindlist(lapply(methods,calc_auc))
+
+  ## Calculate Accuracy
+  calc_accuracy <- function(pred_method) {
+    
+    
+  }
+
+  acc_results <- rbindlist(lapply(methods,calc_accuracy))
 
 
 ####################################################
 ## Export data
+## Check size of all objects
+for (thing in ls()) { message(thing); print(object.size(get(thing)), units='auto') }
+
 ## Export model fits
+save(dt_fit,ct_fit,rf_fit,gb_fit,
+     perf_dtree,perf_ctree,perf_rf,perf_gb,
+     file=paste0(data_dir,"/03_",rep_num,"_",fold_num,"_",death_wt,".RData")
+)
 
 ## Export a csv with AUC, accuracy, model_type, fold#, and rep#
 
