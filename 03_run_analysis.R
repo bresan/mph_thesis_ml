@@ -235,13 +235,15 @@ test_data <- master_data[holdouts]
 
   ## Calculate Accuracy at various cutoffs
   ## Cutoffs are the probability of event (death) predicted by each method
-  get_accuracy <- function(x) {
-    acc_perf@y.values[[1]][max(which(acc_perf@x.values[[1]] >= x))]
-  }
-
+ 
   calc_accuracy <- function(pred_method) {
     library(ROCR)
+    get_accuracy <- function(x) {
+      acc_perf@y.values[[1]][max(which(acc_perf@x.values[[1]] >= x))]
+    }
+    
     acc_perf <- performance(get(paste0("pred_",pred_method)),measure="acc")
+
     ## This gives the accuracy of the method at different cutoffs of predicted probability
     test_probs <- c(seq(.1,.5,.1),.75,.9)
     results <- unlist(do.call(rbind,lapply(test_probs,get_accuracy)))
