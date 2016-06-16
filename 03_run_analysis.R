@@ -32,6 +32,7 @@ if(Sys.info()[1] =="Windows") {
 }
 
 data_dir <- paste0(master_dir,"/data")
+fig_dir <- paste0(data_dir,"/03_figures")
 
 
 #####################################################
@@ -131,7 +132,7 @@ test_data <- master_data[holdouts]
     
     # This only works with sparse_matrix but not the DMatrix -- not really sure what's going on here
     # See http://stackoverflow.com/questions/37057326/grid-tuning-xgboost-with-missing-data for another case of this
-    boost_fit = xgboost(data=sparse_train,label=y,nrounds=10,nfold=10,scale_pos_weight=death_weight) 
+    boost_fit = xgboost(data=sparse_train,label=y,nrounds=100,nfold=10,scale_pos_weight=death_weight) 
     
     print(summary(boost_fit))
     importance <- xgb.importance(feature_names = xgb_features, model = boost_fit)
@@ -165,40 +166,24 @@ test_data <- master_data[holdouts]
 
 ####################################################
 ## Plot results
-  ## Plot decision tree results
-  plotcp(dt_fit)
-  plot(dt_fit, uniform=T)
-  text(dt_fit,use.n=T,all=T,cex=.8)
-
-  ## Plot conditional inference tree results
-  plot(ct_fit,main="Conditional Inference Tree")
-
-  ## Plot random forest results
-  varImpPlot(rf_fit)
-
-  ## Plot xgboost variable importance (top 20)
-  gb_imp <- gb_imp[order(-gb_imp$Gain),]
-  gb_imp <- gb_imp[1:20,]
-  
-  print(xgb.plot.importance(gb_imp))
-
-  ## Plot ROC curves
+  ## Calculate ROC curves
   test_data[,death_test:=as.numeric(death)-1] # Factor var is 1 for alive, 2 for dead -- convert to 0 for alive, 1 for dead
-
+  
   library(ROCR)
   pred_dt <- prediction(dt_preds[,2],test_data[,death_test])
   perf_dt = performance(pred_dt,"tpr","fpr")
-
+  
   pred_ct = prediction(ct_preds[,2],test_data[,death_test])
   perf_ct = performance(pred_ct,"tpr","fpr")
-
+  
   pred_rf <- prediction(rf_preds[,2],test_data[,death_test])
   perf_rf <- performance(pred_rf,"tpr","fpr")
-
+  
   pred_gb <- prediction(gb_preds,test_data[,death_test])
   perf_gb <- performance(pred_gb,"tpr","fpr")
 
   ## Plot ROC curves of predictions
+  pdf(paste0(fig_dir,"/results_",rep_num,"_",fold_num,"_",death_wt,".pdf"))
   plot(perf_dt, main="ROC", col="red")
   plot(perf_ct, col="blue",add=T)
   plot(perf_rf, col="green",add=T)
@@ -209,6 +194,33 @@ test_data <- master_data[holdouts]
          lty = 1, cex=.5,
          col = c("red","blue","green","brown"))
 
+  ## Plot decision tree results
+  plotcp(dt_fit)
+  plot(dt_fit, uniform=T)
+  text(dt_fit,use.n=T,all=T,cex=.8)
+  
+  ## Plot conditional inference tree results
+  plot(ct_fit,main="Conditional Inference Tree")
+  
+  ## Plot random forest results
+  varImpPlot(rf_fit)
+  
+  ## Plot xgboost variable importance (top 20)
+  gb_imp <- gb_imp[order(-gb_imp$Gain),]
+  gb_imp <- gb_imp[1:20,]
+  
+  print(xgb.plot.importance(gb_imp))
+  dev.off()
+  
+  ## Save xgboost ensemble tree
+  ## Note: Output is stored in html format, so it can only be run locally, and exported via RStudio viewer
+  library(stringr)
+  library(DiagrammeR)
+  source(paste0(code_dir,"/xgb_funcs.R")) # Import edited xgboost.multi.tree graphing function
+
+  xg_tree <- xgb.plot.multi.trees(model = gb_fit, features.keep = 3) ## Need to add feature names
+  save(xg_tree,file=paste0(fig_dir,"/gb_",rep_num,"_",fold_num,"_",death_wt,".RData"))
+  
   ## Calculate AUC
   calc_auc <- function(pred_method) {
     library(ROCR)
@@ -221,10 +233,24 @@ test_data <- master_data[holdouts]
   methods <- c("dt","ct","rf","gb")
   auc_results <- rbindlist(lapply(methods,calc_auc))
 
-  ## Calculate Accuracy
+  ## Calculate Accuracy at various cutoffs
+  ## Cutoffs are the probability of event (death) predicted by each method
+  get_accuracy <- function(x) {
+    acc_perf@y.values[[1]][max(which(acc_perf@x.values[[1]] >= x))]
+  }
+
   calc_accuracy <- function(pred_method) {
-    
-    
+    library(ROCR)
+    acc_perf <- performance(get(paste0("pred_",pred_method)),measure="acc")
+    ## This gives the accuracy of the method at different cutoffs of predicted probability
+    test_probs <- c(seq(.1,.5,.1),.75,.9)
+    results <- unlist(do.call(rbind,lapply(test_probs,get_accuracy)))
+    acc_dt <- data.table(cbind(
+      pred_type=rep(pred_method,length(test_probs)),
+      pred_prob=test_probs,
+      results))
+    setnames(acc_dt,"V3","accuracy") # For some reason, renaming accuracy within cbind doesn't work
+    return(acc_dt)
   }
 
   acc_results <- rbindlist(lapply(methods,calc_accuracy))
@@ -233,15 +259,18 @@ test_data <- master_data[holdouts]
 ####################################################
 ## Export data
 ## Check size of all objects
-for (thing in ls()) { message(thing); print(object.size(get(thing)), units='auto') }
+  for (thing in ls()) { message(thing); print(object.size(get(thing)), units='auto') }
 
 ## Export model fits
-save(dt_fit,ct_fit,rf_fit,gb_fit,
-     perf_dtree,perf_ctree,perf_rf,perf_gb,
-     file=paste0(data_dir,"/03_",rep_num,"_",fold_num,"_",death_wt,".RData")
-)
+  save(dt_fit,ct_fit,rf_fit,gb_fit,
+       file=paste0(data_dir,"/03_fits/fit_",rep_num,"_",fold_num,"_",death_wt,".RData")
+  )
 
-## Export a csv with AUC, accuracy, model_type, fold#, and rep#
+## Export csv for AUC and accuracy, with model_type, fold#, and rep#
+  auc_results[,fold:=fold_num]
+  auc_results[,rep:=rep_num]
+  write.csv(auc_results,paste0(data_dir,"/03_perf/auc_",rep_num,"_",fold_num,"_",death_wt,".csv"),row.names=F)
 
-
-
+  acc_results[,fold:=fold_num]
+  acc_results[,rep:=rep_num]
+  write.csv(acc_results,paste0(data_dir,"/03_perf/acc_",rep_num,"_",fold_num,"_",death_wt,".csv"),row.names=F)
