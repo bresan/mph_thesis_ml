@@ -2,13 +2,14 @@
 ## Launch 10 repetitions of 10-fold cross-validation 
 
 ## Setup filepaths
-code_dir <- ""
-data_dir <- ""
-out_dir <- ""
+code_dir <- "/homes/gngu/Thesis/mph_thesis_ml"
+auc_dir <- "/homes/gngu/Thesis/data/03_perf"
+out_dir <- "/homes/gngu/Thesis/results"
 
 ## Identify max number of repetitions and folds
 max_reps <- 10
 max_folds <- 10 
+death_wts <- c(5,10) # How much to weight the outcome of death in the 
 rep_fold_combos <- expand.grid(c(1:max_reps),c(1:max_folds))
 
 
@@ -66,9 +67,14 @@ system(paste0("perl -e 'unlink <",data_dir,"/*.csv>' "))
 
 ########################################################
 ## Launch jobs 
-for(rep in 1:max_reps) {
-  for(fold in 1:max_folds) {
-    qsub(paste0("cv_",rep,"_",fold),code=paste0(code_dir,"/03_run-analysis.R"),pass=list(rep,fold,max_folds),submit=F,proj="")
+# for(rep in 1:max_reps) {
+#   for(fold in 1:max_folds) {
+#       for(weight in death_wts {
+for(rep in 1) {
+  for(fold in 1) {
+    for(weight in 10) {
+        qsub(paste0("cv_",rep,"_",fold),code=paste0(code_dir,"/03_run_analysis.R"),pass=list(rep,fold,max_folds,weight),submit=F,proj="")
+      }
   }
 }
 
@@ -109,19 +115,19 @@ Sys.sleep(60*30)
 
 for(rep in 1:max_reps) {
   print(paste0("Checking folds for rep ",rep))
-  check_results(c(1:max_folds),data_dir,prefix="results)",postfix=".csv",sleep=60)
+  check_results(c(1:max_folds),auc_dir,prefix="hl_bins_)",postfix=".csv",sleep=60)
 }
 
 ## Once all files are written, combine them together
 ## Use check_loc_results, or submit a combine job?
-setwd(data_dir)
-files <- paste0("results_",rep_fold_combos$Var1,"_",rep_fold_combos$Var2,".csv")
-compiled_results <- data.table(rbindlist(lapply(files,function(x) fread(x))))
-
-## Determine the best method based on all of the CV runs
-summary_results <- compiled_results[,list(mean_acc = mean(accuracy), sd_acc = sd(accuracy), mean_auc = mean(auc)), by=list(model_type)]
-
-## Output compiled results and summary metrics
-write.csv(compiled_results,paste0(out_dir,"/compiled_results.csv"),row.names=F)
-write.csv(summary_results,paste0(out_dir,"/summary_results.csv"),row.names=F)
+# setwd(auc_dir)
+# files <- paste0("results_",rep_fold_combos$Var1,"_",rep_fold_combos$Var2,".csv")
+# compiled_results <- data.table(rbindlist(lapply(files,function(x) fread(x))))
+# 
+# ## Determine the best method based on all of the CV runs
+# summary_results <- compiled_results[,list(mean_acc = mean(accuracy), sd_acc = sd(accuracy), mean_auc = mean(auc)), by=list(model_type)]
+# 
+# ## Output compiled results and summary metrics
+# write.csv(compiled_results,paste0(out_dir,"/compiled_results.csv"),row.names=F)
+# write.csv(summary_results,paste0(out_dir,"/summary_results.csv"),row.names=F)
 

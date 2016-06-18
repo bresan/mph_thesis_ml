@@ -43,6 +43,7 @@ postfix <- paste0(rep_num,"_",fold_num,"_",death_wt)
 library(data.table) # For easy data management
 library(ggplot2) # For graphing
 library(caret) # To create folds for each repetition of k-fold cross-validation
+library(reshape2) # Standard reshaping requirements
 
 ## Import analysis functions
 source(paste0(code_dir,"/analysis_functions.R"))
@@ -210,9 +211,8 @@ test_data <- master_data[holdouts]
   
   ## Plot xgboost variable importance (top 20)
   gb_imp <- gb_imp[order(-gb_imp$Gain),]
-  gb_imp <- gb_imp[1:20,]
   
-  print(xgb.plot.importance(gb_imp))
+  print(xgb.plot.importance(gb_imp[1:20,]))
   dev.off()
   
   ## Save xgboost ensemble tree
@@ -294,25 +294,85 @@ test_data <- master_data[holdouts]
   for (thing in ls()) { message(thing); print(object.size(get(thing)), units='auto') }
 
 ## Export model fits
-  save(dt_fit,ct_fit,rf_fit,gb_fit,
-       file=paste0(data_dir,"/03_fits/fit_",postfix,".RData")
-  )
+#   save(dt_fit,ct_fit,rf_fit,gb_fit,
+#        file=paste0(data_dir,"/03_fits/fit_",postfix,".RData")
+#   )
+
+## Export variables included in trees and variable importances (RF and GB)
+## dt_fit, ct_fit, rf_fit, gb_fit
+
+  var_list <- c()
+  traverse <- function(treenode){
+    if(treenode$terminal){
+      bas=paste("Current node is terminal node with",treenode$nodeID,'prediction',treenode$prediction)
+      print(bas)
+      return(0)
+    } else {
+      bas=paste("Current node",treenode$nodeID,"Split var. ID:",treenode$psplit$variableName,"split value:",treenode$psplit$splitpoint,'prediction',treenode$prediction)
+      print(bas)
+      var_list <<- c(var_list,treenode$psplit$variableName) ## Edit the global var_list variable (can't do it inside and return var_list because of recursion)
+    }
+    traverse(treenode$left)
+    traverse(treenode$right)
+  }
+
+  traverse(ct_fit@tree)
+  ct_list <- data.table(var_names,include=1,method="ct")
+
+  ct_list[,fold:=fold_num]
+  ct_list[,rep:=rep_num]
+  ct_list[,d_wt:=death_wt]
+    
+  ## Data.table with model_type, imp_type (gini or other), measure
+  pull_imp <- function(pred_type) {
+    if(grepl("dt",pred_type)) {
+      imp <- data.frame(measure=get(paste0(pred_type,"_fit"))$variable.importance)
+      setDT(imp,keep.rownames=T)
+      setnames(imp,c("rn"),c("var_name"))
+      
+      imp[,imp_type:="accuracy"]
+    } else if(grepl("rf",pred_type)) {
+      imp <- data.frame(get(paste0(pred_type,"_fit"))$importance)
+      setDT(imp, keep.rownames=T)
+      setnames(imp,c("rn","MeanDecreaseAccuracy","MeanDecreaseGini"),c("var_name","accuracy","gini"))
+      imp[,c("Yes","No"):=NULL]
+      imp <- melt(imp,id.vars="var_name",variable.name="imp_type",value.name="measure",variable.factor=F)
+    } else if(grepl("gb",pred_type)) {
+      imp <- get(paste0(pred_type,"_imp"))[,list(Feature,Gain)]
+      setnames(imp,c("Feature","Gain"),c("var_name","measure"))
+      imp[,imp_type:="accuracy"]
+    }
+    imp[,model_type:=pred_type]
+  }
+  imp_methods <- methods[!methods %in% "ct"]
+  importances <- rbindlist(lapply(imp_methods,pull_imp))
+
+  importances[,fold:=fold_num]
+  importances[,rep:=rep_num]
+  importances[,d_wt:=death_wt]
+  
+  write.csv(ct_list,paste0(data_dir,"/03_perf/ct_vars_",postfix,".csv"),row.names=F)
+  write.csv(importances,paste0(data_dir,"/03_perf/imp_",postfix,".csv"),row.names=F)
 
 ## Export csv for AUC, accuracy, and hosmer-lemeshow, along with fold# and rep#
   auc_results[,fold:=fold_num]
   auc_results[,rep:=rep_num]
+  auc_results[,d_wt:=death_wt]
   write.csv(auc_results,paste0(data_dir,"/03_perf/auc_",postfix,".csv"),row.names=F)
 
   acc_results[,fold:=fold_num]
   acc_results[,rep:=rep_num]
+  acc_results[,d_wt:=death_wt]
   write.csv(acc_results,paste0(data_dir,"/03_perf/acc_",postfix,".csv"),row.names=F)
 
   hl_compiled[,fold:=fold_num]
   hl_compiled[,rep:=rep_num]
+  hl_compiled[,d_wt:=death_wt]
   write.csv(hl_compiled,paste0(data_dir,"/03_perf/hl_",postfix,".csv"),row.names=F)
     
   hl_bins[,fold:=fold_num]
   hl_bins[,rep:=rep_num]
+  hl_bins[,d_wt:=death_wt]
   write.csv(hl_bins,paste0(data_dir,"/03_perf/hl_bins_",postfix,".csv"),row.names=F)
 
 
