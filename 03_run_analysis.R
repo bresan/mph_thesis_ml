@@ -34,6 +34,9 @@ if(Sys.info()[1] =="Windows") {
 data_dir <- paste0(master_dir,"/data")
 fig_dir <- paste0(data_dir,"/03_figures")
 
+## Create a common post-fix for standard saving of files with post-fixes by rep/fold/weight combinations
+postfix <- paste0(rep_num,"_",fold_num,"_",death_wt)
+
 
 #####################################################
 ## Set Packages
@@ -132,7 +135,7 @@ test_data <- master_data[holdouts]
     
     # This only works with sparse_matrix but not the DMatrix -- not really sure what's going on here
     # See http://stackoverflow.com/questions/37057326/grid-tuning-xgboost-with-missing-data for another case of this
-    boost_fit = xgboost(data=sparse_train,label=y,nrounds=100,nfold=10,scale_pos_weight=death_weight) 
+    boost_fit = xgboost(data=sparse_train,label=y,nrounds=100,nfold=10,scale_pos_weight=death_weight,objective="binary:logistic") 
     
     print(summary(boost_fit))
     importance <- xgb.importance(feature_names = xgb_features, model = boost_fit)
@@ -183,7 +186,7 @@ test_data <- master_data[holdouts]
   perf_gb <- performance(pred_gb,"tpr","fpr")
 
   ## Plot ROC curves of predictions
-  pdf(paste0(fig_dir,"/results_",rep_num,"_",fold_num,"_",death_wt,".pdf"))
+  pdf(paste0(fig_dir,"/results_",postfix,".pdf"))
   plot(perf_dt, main="ROC", col="red")
   plot(perf_ct, col="blue",add=T)
   plot(perf_rf, col="green",add=T)
@@ -219,7 +222,7 @@ test_data <- master_data[holdouts]
   source(paste0(code_dir,"/xgb_funcs.R")) # Import edited xgboost.multi.tree graphing function
 
   xg_tree <- xgb.plot.multi.trees(model = gb_fit, features.keep = 3) ## Need to add feature names
-  save(xg_tree,file=paste0(fig_dir,"/gb_",rep_num,"_",fold_num,"_",death_wt,".RData"))
+  save(xg_tree,file=paste0(fig_dir,"/gb_",postfix,".RData"))
   
   ## Calculate AUC
   calc_auc <- function(pred_method) {
@@ -235,7 +238,6 @@ test_data <- master_data[holdouts]
 
   ## Calculate Accuracy at various cutoffs
   ## Cutoffs are the probability of event (death) predicted by each method
- 
   calc_accuracy <- function(pred_method) {
     library(ROCR)
     get_accuracy <- function(x) {
@@ -257,6 +259,34 @@ test_data <- master_data[holdouts]
 
   acc_results <- rbindlist(lapply(methods,calc_accuracy))
 
+  ## Calculate Hosmer-Lemeshow statistic
+  ## Create function that takes in pred_method and returns a data.table with the statistic and p_value
+  calc_hl <- function(pred_method) {
+    library(ResourceSelection)
+    ifelse(grepl("gb",pred_method),
+           hl_results <- hoslem.test(test_data[,death_test],get(paste0(pred_method,"_preds")),g=15),
+           hl_results <- hoslem.test(test_data[,death_test],get(paste0(pred_method,"_preds"))[,2],g=15)
+    )
+    results <- data.table(method=pred_method,stat=hl_results$statistic,p=hl_results$p.value)
+    return(results)
+  }
+
+  hl_compiled <- rbindlist(lapply(methods,calc_hl))
+
+  calc_hl_bins <- function(pred_method) {
+    library(ResourceSelection)
+    ifelse(grepl("gb",pred_method),
+           hl_results <- hoslem.test(test_data[,death_test],get(paste0(pred_method,"_preds")),g=15),
+           hl_results <- hoslem.test(test_data[,death_test],get(paste0(pred_method,"_preds"))[,2],g=15)
+    )
+    bin_results <- data.frame(cbind(hl_results$observed,hl_results$expected))
+    bin_results$method <- paste0(pred_method)
+    setDT(bin_results,keep.rownames=T)
+    setnames(bin_results,"rn","prob_range")
+    return(bin_results)
+  }
+  hl_bins <- rbindlist(lapply(methods,calc_hl_bins))
+
 
 ####################################################
 ## Export data
@@ -265,14 +295,24 @@ test_data <- master_data[holdouts]
 
 ## Export model fits
   save(dt_fit,ct_fit,rf_fit,gb_fit,
-       file=paste0(data_dir,"/03_fits/fit_",rep_num,"_",fold_num,"_",death_wt,".RData")
+       file=paste0(data_dir,"/03_fits/fit_",postfix,".RData")
   )
 
-## Export csv for AUC and accuracy, with model_type, fold#, and rep#
+## Export csv for AUC, accuracy, and hosmer-lemeshow, along with fold# and rep#
   auc_results[,fold:=fold_num]
   auc_results[,rep:=rep_num]
-  write.csv(auc_results,paste0(data_dir,"/03_perf/auc_",rep_num,"_",fold_num,"_",death_wt,".csv"),row.names=F)
+  write.csv(auc_results,paste0(data_dir,"/03_perf/auc_",postfix,".csv"),row.names=F)
 
   acc_results[,fold:=fold_num]
   acc_results[,rep:=rep_num]
-  write.csv(acc_results,paste0(data_dir,"/03_perf/acc_",rep_num,"_",fold_num,"_",death_wt,".csv"),row.names=F)
+  write.csv(acc_results,paste0(data_dir,"/03_perf/acc_",postfix,".csv"),row.names=F)
+
+  hl_compiled[,fold:=fold_num]
+  hl_compiled[,rep:=rep_num]
+  write.csv(hl_compiled,paste0(data_dir,"/03_perf/hl_",postfix,".csv"),row.names=F)
+    
+  hl_bins[,fold:=fold_num]
+  hl_bins[,rep:=rep_num]
+  write.csv(hl_bins,paste0(data_dir,"/03_perf/hl_bins_",postfix,".csv"),row.names=F)
+
+
