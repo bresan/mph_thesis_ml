@@ -7,8 +7,8 @@ auc_dir <- "/homes/gngu/Thesis/data/03_perf"
 out_dir <- "/homes/gngu/Thesis/results"
 
 ## Identify max number of repetitions and folds
-max_reps <- 10
-max_folds <- 10 
+max_reps <- 1
+max_folds <- 1 
 death_wts <- c(5,10) # How much to weight the outcome of death in the 
 rep_fold_combos <- expand.grid(c(1:max_reps),c(1:max_folds))
 
@@ -59,7 +59,7 @@ qsub <- function(jobname, code, hold=NULL, pass=NULL, slots=1, submit=F, log=T, 
 
 ########################################################
 ## Delete existing output from analyses
-system(paste0("perl -e 'unlink <",data_dir,"/*.csv>' "))
+system(paste0("perl -e 'unlink <",auc_dir,"/*.csv>' "))
 
 # Alternative if no perl:
 # system(paste0("rm ",data_dir,"/*.csv"))
@@ -70,10 +70,11 @@ system(paste0("perl -e 'unlink <",data_dir,"/*.csv>' "))
 # for(rep in 1:max_reps) {
 #   for(fold in 1:max_folds) {
 #       for(weight in death_wts {
-for(rep in 1) {
-  for(fold in 1) {
-    for(weight in 10) {
-        qsub(paste0("cv_",rep,"_",fold),code=paste0(code_dir,"/03_run_analysis.R"),pass=list(rep,fold,max_folds,weight),submit=F,proj="")
+setwd(code_dir)
+for(rep in 1:max_reps) {
+  for(fold in 1:max_folds) {
+    for(weight in death_wts) {
+        qsub(paste0("cv_",rep,"_",fold,"_",weight),code=paste0(code_dir,"/03_run_analysis.R"),pass=list(rep,fold,max_folds,weight),slots=6,submit=T,proj="")
       }
   }
 }
@@ -114,8 +115,10 @@ check_results <- function(locations,check_dir,prefix="",postfix,sleep=30) {
 Sys.sleep(60*30)
 
 for(rep in 1:max_reps) {
-  print(paste0("Checking folds for rep ",rep))
-  check_results(c(1:max_folds),auc_dir,prefix="hl_bins_)",postfix=".csv",sleep=60)
+  for(wt in death_wts) {
+    print(paste0("Checking folds for rep ",rep," and weight ",wt))
+    check_results(c(1:max_folds),auc_dir,prefix="hl_bins_",postfix=paste0("_",wt,".csv"),sleep=60)
+  }
 }
 
 ## Once all files are written, combine them together

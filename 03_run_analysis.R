@@ -6,37 +6,43 @@
 #####################################################
 ## Set filepaths to code and data
 if(Sys.info()[1] =="Windows") {
-  master_dir <- "H:/Thesis"
-  code_dir <- paste0(master_dir,"/mph_thesis_ml")
+  home_dir <- "H:/Thesis"
   
   rep_num <- 1      # The repetition number used for the cross-validation (10 repetitions of 10-fold CV), used as a unique seed for each rep
   fold_num <- 10    # The fold number that we should extract from the 10-fold CV to use as a holdout
   tot_folds <- 10   # The total number of folds that we are running (to make sure we specify the correct value for k in createFolds)
   death_wt <- 10    # The weights to use on death for the different methods
 } else if (Sys.info()[1] == "Darwin") { # Macintosh
-  master_dir <- "/Users/Grant/Desktop/Thesis"
-  code_dir <- paste0(master_dir,"/code")
+  home_dir <- "/Users/Grant/Desktop/Thesis"
   
   rep_num <- 1
   fold_num <- 10
   tot_folds <- 10
   death_wt <- 10
-} else if (Sys.info()[1] == "Unix") {
-  master_dir <- "/Users/Grant/Desktop/Thesis"
-  code_dir <- paste0(master_dir,"/code")
+} else if (Sys.info()[1] == "Linux") {
+  home_dir <- "/homes/gngu/Thesis"
   
-  rep_num <- commandArgs()[3]
-  fold_num <- commandArgs()[4]
-  tot_folds <- commandArgs()[5]
-  death_wt <- commandArgs()[6]
+  rep_num <- as.numeric(commandArgs()[4])
+  fold_num <- as.numeric(commandArgs()[5])
+  tot_folds <- as.numeric(commandArgs()[6])
+  death_wt <- as.numeric(commandArgs()[7])
+  
+  print(commandArgs())
 }
 
-data_dir <- paste0(master_dir,"/data")
+load(paste0(home_dir,"/data/02_prepped_data.RData"))
+data_dir <- paste0(home_dir,"/data")
 fig_dir <- paste0(data_dir,"/03_figures")
+code_dir <- paste0(home_dir,"/mph_thesis_ml")
+
+print(home_dir)
+print(code_dir)
 
 ## Create a common post-fix for standard saving of files with post-fixes by rep/fold/weight combinations
 postfix <- paste0(rep_num,"_",fold_num,"_",death_wt)
 
+## Add a new R libraries location containing ROCR, xgboost, DiagrammeR, ResourceSelection, Ckmeans.1d.dp, and party packages (not installed on routine cluster)
+.libPaths(new = c(.libPaths(),paste0(home_dir,"/../r_libraries")))
 
 #####################################################
 ## Set Packages
@@ -52,8 +58,7 @@ source(paste0(code_dir,"/analysis_functions.R"))
 set.seed(paste0(rep_num,"99",fold_num,"99",death_wt))
 
 ####################################################
-## Import data
-load(paste0(data_dir,"/02_prepped_data.RData"))
+## Format data
 
 ## Create test and train datasets
 data_indices <- master_data[,as.factor(death)]
@@ -81,7 +86,7 @@ test_data <- master_data[holdouts]
     rt_pred <- predict(rt_fit,test_data)
     return(list(rt_fit, rt_pred))
   }
-  
+  print(death_wt)
   system.time(dt_results <- run_dtree(data=train_data,formula=test_formula,death_weight=death_wt))
   dt_fit <- dt_results[1][[1]]
   dt_preds <- dt_results[2][[1]]
@@ -116,7 +121,20 @@ test_data <- master_data[holdouts]
     return(list(rf_fit,rf_pred))
   }
 
-  system.time(rf_results <- run_rf(data=train_data,num_trees=100,formula=test_formula,sample_weights=death_wt))
+  run_par_rf <- function(data,formula,sample_weights) {
+    library(doMC)
+    registerDoMC(cores=4)
+    rf_fit <- foreach(ntree=rep(100,4), .combine=c, .multicombine=TRUE,
+                  .packages='randomForest') %dopar% {
+                    randomForest(formula=formula,data=data.frame(data),ntree=ntree,replace=T,keep.forest=T,importance=T,classwt=c(1,sample_weights))
+                  }
+    save(rf_fit,file=paste0(data_dir,"/03_fits/rf_fit_",postfix,".RData"))
+    rf_pred = predict(rf_fit,type="prob",newdata=test_data)
+    return(list(rf_fit,rf_pred))
+  }
+
+  system.time(rf_results <- run_par_rf(data=train_data,formula=test_formula,sample_weights=death_wt))
+
   rf_fit <- rf_results[1][[1]]
   rf_preds <- rf_results[2][[1]]
 
@@ -124,7 +142,7 @@ test_data <- master_data[holdouts]
 ## Roughly 20 seconds for 5 rounds and 3 folds
   run_boost <- function(tr_data,te_data,death_weight) {
     library(xgboost); library(Matrix)
-    library(Ckmeans.1d.dp) ## Needed for xgb.plot.importance
+#     library(Ckmeans.1d.dp) ## Needed for xgb.plot.importance
     library(DiagrammeR) ## Needed for xgb.plot.tree
     
     xgb_features <- names(tr_data)[names(tr_data) != "death"]
@@ -212,13 +230,17 @@ test_data <- master_data[holdouts]
   ## Plot xgboost variable importance (top 20)
   gb_imp <- gb_imp[order(-gb_imp$Gain),]
   
-  print(xgb.plot.importance(gb_imp[1:20,]))
+#   print(xgb.plot.importance(gb_imp[1:20,]))
   dev.off()
   
   ## Save xgboost ensemble tree
   ## Note: Output is stored in html format, so it can only be run locally, and exported via RStudio viewer
   library(stringr)
   library(DiagrammeR)
+
+  print(home_dir)
+  print(code_dir)
+
   source(paste0(code_dir,"/xgb_funcs.R")) # Import edited xgboost.multi.tree graphing function
 
   xg_tree <- xgb.plot.multi.trees(model = gb_fit, features.keep = 3) ## Need to add feature names
@@ -317,7 +339,7 @@ test_data <- master_data[holdouts]
   }
 
   traverse(ct_fit@tree)
-  ct_list <- data.table(var_names,include=1,method="ct")
+  ct_list <- data.table(var_name=var_list,include=1,method="ct")
 
   ct_list[,fold:=fold_num]
   ct_list[,rep:=rep_num]

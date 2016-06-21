@@ -1,2 +1,2 @@
 #$ -S /bin/sh
-/usr/local/bin/R <$1  --no-save $2 $3
+/share/local/R-3.2.4/bin/R --no-save <$1 $*
