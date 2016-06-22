@@ -35,8 +35,7 @@ data_dir <- paste0(home_dir,"/data")
 fig_dir <- paste0(data_dir,"/03_figures")
 code_dir <- paste0(home_dir,"/mph_thesis_ml")
 
-print(home_dir)
-print(code_dir)
+# test_formula <- as.formula("death~.") # Refactor formula to see if computation goes quicker
 
 ## Create a common post-fix for standard saving of files with post-fixes by rep/fold/weight combinations
 postfix <- paste0(rep_num,"_",fold_num,"_",death_wt)
@@ -70,6 +69,8 @@ holdouts <- createFolds(data_indices,k=tot_folds,list=T,returnTrain=F)[[fold_num
 train_data <- master_data[-holdouts]
 test_data <- master_data[holdouts]
 
+# save(train_data,file=paste0(data_dir,"/test_split_",postfix,".RData"))
+
 ####################################################
 ## Run analyses, extract pertinent information
 ## Dealing with unbalanced data http://digitalassets.lib.berkeley.edu/sdtr/ucb/text/666.pdf
@@ -77,16 +78,14 @@ test_data <- master_data[holdouts]
 ## Decision Tree
   run_dtree <- function(data,formula,death_weight=10) {
     library(rpart)
-    ## Create a regression tree using rpart
     data_new <- copy(data)
     data_new[death=="No",weight:=1]
     data_new[death=="Yes",weight:=death_weight]
-    
-    rt_fit <- rpart(formula,data=data.frame(data_new),control=rpart.control(),weights=weight)
+    ## Create a regression tree using rpart    
+    rt_fit <- rpart(formula,data=data.frame(data_new),control=rpart.control(),weights=weight,parms=list(split="information", loss=matrix(c(0,death_weight,1,0), byrow=TRUE, nrow=2)))
     rt_pred <- predict(rt_fit,test_data)
     return(list(rt_fit, rt_pred))
   }
-  print(death_wt)
   system.time(dt_results <- run_dtree(data=train_data,formula=test_formula,death_weight=death_wt))
   dt_fit <- dt_results[1][[1]]
   dt_preds <- dt_results[2][[1]]
@@ -112,6 +111,7 @@ test_data <- master_data[holdouts]
 
 ## Run a random forest 
 ## Roughly 35 minutes for 100 trees -> ~3 hours for 500 trees
+## http://stats.stackexchange.com/questions/37370/random-forest-computing-time-in-r
   run_rf <- function(data,num_trees,formula,sample_weights) {
     library(randomForest)
     rf_fit <- randomForest(formula,data=data.frame(data),ntree=num_trees,replace=T,keep.forest=T,importance=T,classwt=c(1,sample_weights))
@@ -123,12 +123,30 @@ test_data <- master_data[holdouts]
 
   run_par_rf <- function(data,formula,sample_weights) {
     library(doMC)
+    library(randomForest)
     registerDoMC(cores=4)
-    rf_fit <- foreach(ntree=rep(100,4), .combine=c, .multicombine=TRUE,
+    
+    ## Separate out the outcome variable for speed purposes
+    data_new <- copy(data)
+    outcome <- data_new[,death]
+    data_new[,death:=NULL]
+    rf_fit <- foreach(ntree=rep(25,4), .combine=combine, .multicombine=TRUE,
                   .packages='randomForest') %dopar% {
-                    randomForest(formula=formula,data=data.frame(data),ntree=ntree,replace=T,keep.forest=T,importance=T,classwt=c(1,sample_weights))
+                    randomForest(x=data_new,y=outcome,ntree=ntree,replace=T,keep.forest=T,importance=T,classwt=c(1,sample_weights))
                   }
     save(rf_fit,file=paste0(data_dir,"/03_fits/rf_fit_",postfix,".RData"))
+    rf_pred = predict(rf_fit,type="prob",newdata=test_data)
+    return(list(rf_fit,rf_pred))
+  }
+
+  run_car_rf <- function(data,formula,sample_weights) {
+    library(doMC); library(caret)
+    registerDoMC(cores=4)
+    control <- trainControl(method="repeatedcv",number=10,repeats=3,classProbs=T)
+    tunegrid <- expand.grid(ntree=c(50, 100, 200))
+    train_model <- train(formula=formula,data=data.frame(data),method=customRF,metric=metric,tunGrid=tunegrid,trControl=control)
+    
+    save(rf_fit,file=paste0(data_dir,"/03_fits/caret_fit_",postfix,".RData"))
     rf_pred = predict(rf_fit,type="prob",newdata=test_data)
     return(list(rf_fit,rf_pred))
   }
@@ -218,8 +236,8 @@ test_data <- master_data[holdouts]
 
   ## Plot decision tree results
   plotcp(dt_fit)
-  plot(dt_fit, uniform=T)
-  text(dt_fit,use.n=T,all=T,cex=.8)
+#   plot(dt_fit, uniform=T)
+#   text(dt_fit,use.n=T,all=T,cex=.8)
   
   ## Plot conditional inference tree results
   plot(ct_fit,main="Conditional Inference Tree")
@@ -286,11 +304,15 @@ test_data <- master_data[holdouts]
   calc_hl <- function(pred_method) {
     library(ResourceSelection)
     ifelse(grepl("gb",pred_method),
-           hl_results <- hoslem.test(test_data[,death_test],get(paste0(pred_method,"_preds")),g=15),
-           hl_results <- hoslem.test(test_data[,death_test],get(paste0(pred_method,"_preds"))[,2],g=15)
-    )
-    results <- data.table(method=pred_method,stat=hl_results$statistic,p=hl_results$p.value)
-    return(results)
+           preds <- get(paste0(pred_method,"_preds")),
+           preds <- get(paste0(pred_method,"_preds"))[,2])
+    if(length(unique(preds)) != 1) {
+      hl_results <- hoslem.test(test_data[,death_test],preds,g=15)
+      results <- data.table(method=pred_method,stat=hl_results$statistic,p=hl_results$p.value)
+    } else {
+      results <- data.table(method=pred_method,stat=NA,p=0)
+    }
+    return(results)  
   }
 
   hl_compiled <- rbindlist(lapply(methods,calc_hl))
@@ -298,13 +320,17 @@ test_data <- master_data[holdouts]
   calc_hl_bins <- function(pred_method) {
     library(ResourceSelection)
     ifelse(grepl("gb",pred_method),
-           hl_results <- hoslem.test(test_data[,death_test],get(paste0(pred_method,"_preds")),g=15),
-           hl_results <- hoslem.test(test_data[,death_test],get(paste0(pred_method,"_preds"))[,2],g=15)
-    )
-    bin_results <- data.frame(cbind(hl_results$observed,hl_results$expected))
-    bin_results$method <- paste0(pred_method)
-    setDT(bin_results,keep.rownames=T)
-    setnames(bin_results,"rn","prob_range")
+           preds <- get(paste0(pred_method,"_preds")),
+           preds <- get(paste0(pred_method,"_preds"))[,2])
+    if(length(unique(preds)) != 1) {
+      hl_results <- hoslem.test(test_data[,death_test],preds,g=15)
+      bin_results <- data.frame(cbind(hl_results$observed,hl_results$expected))
+      bin_results$method <- paste0(pred_method)
+      setDT(bin_results,keep.rownames=T)
+      setnames(bin_results,"rn","prob_range")
+    } else {
+      bin_results <- data.table(prob_range="0,1",method=paste0(pred_method),y0=NA,y1=NA,yhat0=NA,yhat1=NA)
+    }
     return(bin_results)
   }
   hl_bins <- rbindlist(lapply(methods,calc_hl_bins))
@@ -347,12 +373,14 @@ test_data <- master_data[holdouts]
     
   ## Data.table with model_type, imp_type (gini or other), measure
   pull_imp <- function(pred_type) {
-    if(grepl("dt",pred_type)) {
+    if(grepl("dt",pred_type) & !is.null(get(paste0(pred_type,"_fit"))$variable.importance)) {
       imp <- data.frame(measure=get(paste0(pred_type,"_fit"))$variable.importance)
       setDT(imp,keep.rownames=T)
       setnames(imp,c("rn"),c("var_name"))
       
       imp[,imp_type:="accuracy"]
+    } else if(grepl("dt",pred_type) & is.null(get(paste0(pred_type,"_fit"))$variable.importance)) {
+      imp <- data.table(var_name=NA,imp_type=NA,measure=NA)
     } else if(grepl("rf",pred_type)) {
       imp <- data.frame(get(paste0(pred_type,"_fit"))$importance)
       setDT(imp, keep.rownames=T)

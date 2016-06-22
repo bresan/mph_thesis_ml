@@ -7,8 +7,8 @@ auc_dir <- "/homes/gngu/Thesis/data/03_perf"
 out_dir <- "/homes/gngu/Thesis/results"
 
 ## Identify max number of repetitions and folds
-max_reps <- 1
-max_folds <- 1 
+max_reps <- 10
+max_folds <- 10 ## This must be over 1 otherwise everything will be in the test dataset
 death_wts <- c(5,10) # How much to weight the outcome of death in the 
 rep_fold_combos <- expand.grid(c(1:max_reps),c(1:max_folds))
 
@@ -117,7 +117,7 @@ Sys.sleep(60*30)
 for(rep in 1:max_reps) {
   for(wt in death_wts) {
     print(paste0("Checking folds for rep ",rep," and weight ",wt))
-    check_results(c(1:max_folds),auc_dir,prefix="hl_bins_",postfix=paste0("_",wt,".csv"),sleep=60)
+    check_results(c(1:max_folds),auc_dir,prefix=paste0("hl_bins_",rep,"_"),postfix=paste0("_",wt,".csv"),sleep=60)
   }
 }
 
