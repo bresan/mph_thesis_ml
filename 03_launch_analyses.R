@@ -74,7 +74,7 @@ setwd(code_dir)
 for(rep in 1:max_reps) {
   for(fold in 1:max_folds) {
     for(weight in death_wts) {
-        qsub(paste0("cv_",rep,"_",fold,"_",weight),code=paste0(code_dir,"/03_run_analysis.R"),pass=list(rep,fold,max_folds,weight),slots=6,submit=T,proj="")
+        qsub(paste0("cv_",rep,"_",fold,"_",weight),code=paste0(code_dir,"/03_run_analysis.R"),pass=list(rep,fold,max_folds,weight),slots=7,submit=T,proj="")
       }
   }
 }
@@ -120,17 +120,3 @@ for(rep in 1:max_reps) {
     check_results(c(1:max_folds),auc_dir,prefix=paste0("hl_bins_",rep,"_"),postfix=paste0("_",wt,".csv"),sleep=60)
   }
 }
-
-## Once all files are written, combine them together
-## Use check_loc_results, or submit a combine job?
-# setwd(auc_dir)
-# files <- paste0("results_",rep_fold_combos$Var1,"_",rep_fold_combos$Var2,".csv")
-# compiled_results <- data.table(rbindlist(lapply(files,function(x) fread(x))))
-# 
-# ## Determine the best method based on all of the CV runs
-# summary_results <- compiled_results[,list(mean_acc = mean(accuracy), sd_acc = sd(accuracy), mean_auc = mean(auc)), by=list(model_type)]
-# 
-# ## Output compiled results and summary metrics
-# write.csv(compiled_results,paste0(out_dir,"/compiled_results.csv"),row.names=F)
-# write.csv(summary_results,paste0(out_dir,"/summary_results.csv"),row.names=F)
-

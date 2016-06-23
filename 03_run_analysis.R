@@ -75,6 +75,21 @@ test_data <- master_data[holdouts]
 ## Run analyses, extract pertinent information
 ## Dealing with unbalanced data http://digitalassets.lib.berkeley.edu/sdtr/ucb/text/666.pdf
 
+## Logistic Regression
+  run_logistic <- function(data,formula) {
+    lr_fit <- glm(formula,data=data,family = binomial(link = "logit"))
+    lr_pred <- predict(lr_fit,test_data)
+    return(list(lr_fit, lr_pred))
+  }
+  system.time(lr_results <- run_logistic(data=train_data,formula=test_formula))
+  lr_fit <- lr_results[1][[1]]
+  lr_preds <- lr_results[2][[1]]
+
+## Logistic Regression with Backwards Selection
+## new <- step(lr_fit)
+## However, runtime is indeterminate right now (____ hrs)
+
+
 ## Decision Tree
   run_dtree <- function(data,formula,death_weight=10) {
     library(rpart)
@@ -82,7 +97,8 @@ test_data <- master_data[holdouts]
     data_new[death=="No",weight:=1]
     data_new[death=="Yes",weight:=death_weight]
     ## Create a regression tree using rpart    
-    rt_fit <- rpart(formula,data=data.frame(data_new),control=rpart.control(),weights=weight,parms=list(split="information", loss=matrix(c(0,death_weight,1,0), byrow=TRUE, nrow=2)))
+#     rt_fit <- rpart(formula,data=data.frame(data_new),control=rpart.control(),weights=weight,parms=list(split="information", loss=matrix(c(0,death_weight,1,0), byrow=TRUE, nrow=2)))
+    rt_fit <- rpart(formula,data=data.frame(data_new),control=rpart.control(),weights=weight)
     rt_pred <- predict(rt_fit,test_data)
     return(list(rt_fit, rt_pred))
   }
@@ -130,7 +146,7 @@ test_data <- master_data[holdouts]
     data_new <- copy(data)
     outcome <- data_new[,death]
     data_new[,death:=NULL]
-    rf_fit <- foreach(ntree=rep(25,4), .combine=combine, .multicombine=TRUE,
+    rf_fit <- foreach(ntree=rep(200,4), .combine=combine, .multicombine=TRUE,
                   .packages='randomForest') %dopar% {
                     randomForest(x=data_new,y=outcome,ntree=ntree,replace=T,keep.forest=T,importance=T,classwt=c(1,sample_weights))
                   }
@@ -151,8 +167,11 @@ test_data <- master_data[holdouts]
     return(list(rf_fit,rf_pred))
   }
 
+if(Sys.info()[1] =="Unix") {
   system.time(rf_results <- run_par_rf(data=train_data,formula=test_formula,sample_weights=death_wt))
-
+} else if(Sys.info()[1] =="Windows")  {
+  system.time(rf_results <- run_rf(data=train_data,formula=test_formula,sample_weights=death_wt,num_trees=50))
+}
   rf_fit <- rf_results[1][[1]]
   rf_preds <- rf_results[2][[1]]
 
@@ -172,7 +191,7 @@ test_data <- master_data[holdouts]
     
     # This only works with sparse_matrix but not the DMatrix -- not really sure what's going on here
     # See http://stackoverflow.com/questions/37057326/grid-tuning-xgboost-with-missing-data for another case of this
-    boost_fit = xgboost(data=sparse_train,label=y,nrounds=100,nfold=10,scale_pos_weight=death_weight,objective="binary:logistic") 
+    boost_fit = xgboost(data=sparse_train,label=y,nrounds=200,nfold=10,scale_pos_weight=death_weight,objective="binary:logistic") 
     
     print(summary(boost_fit))
     importance <- xgb.importance(feature_names = xgb_features, model = boost_fit)
@@ -210,6 +229,9 @@ test_data <- master_data[holdouts]
   test_data[,death_test:=as.numeric(death)-1] # Factor var is 1 for alive, 2 for dead -- convert to 0 for alive, 1 for dead
   
   library(ROCR)
+  pred_lr <- prediction(lr_preds,test_data[,death_test])
+  perf_lr <- performance(pred_lr,"tpr","fpr")
+
   pred_dt <- prediction(dt_preds[,2],test_data[,death_test])
   perf_dt = performance(pred_dt,"tpr","fpr")
   
@@ -224,15 +246,16 @@ test_data <- master_data[holdouts]
 
   ## Plot ROC curves of predictions
   pdf(paste0(fig_dir,"/results_",postfix,".pdf"))
-  plot(perf_dt, main="ROC", col="red")
+  plot(perf_lr, main="ROC", col="red")
+  plot(perf_dt, col="black",add=T)
   plot(perf_ct, col="blue",add=T)
   plot(perf_rf, col="green",add=T)
   plot(perf_gb, col="brown",add=T)
   abline(a=0,b=1)
   legend("bottomleft", 
-         legend = c("Decision Tree","Conditional Tree","Random Forests","Gradient Boosting Machines"), 
+         legend = c("Logistic Regression","Decision Tree","Conditional Tree","Random Forests","Gradient Boosting Machines"), 
          lty = 1, cex=.5,
-         col = c("red","blue","green","brown"))
+         col = c("red","black","blue","green","brown"))
 
   ## Plot decision tree results
   plotcp(dt_fit)
@@ -273,7 +296,7 @@ test_data <- master_data[holdouts]
     return(auc_dt)
   }
 
-  methods <- c("dt","ct","rf","gb")
+  methods <- c("lr","dt","ct","rf","gb")
   auc_results <- rbindlist(lapply(methods,calc_auc))
 
   ## Calculate Accuracy at various cutoffs
@@ -303,7 +326,7 @@ test_data <- master_data[holdouts]
   ## Create function that takes in pred_method and returns a data.table with the statistic and p_value
   calc_hl <- function(pred_method) {
     library(ResourceSelection)
-    ifelse(grepl("gb",pred_method),
+    ifelse(grepl("gb",pred_method) | grepl("lr",pred_method),
            preds <- get(paste0(pred_method,"_preds")),
            preds <- get(paste0(pred_method,"_preds"))[,2])
     if(length(unique(preds)) != 1) {
@@ -319,7 +342,7 @@ test_data <- master_data[holdouts]
 
   calc_hl_bins <- function(pred_method) {
     library(ResourceSelection)
-    ifelse(grepl("gb",pred_method),
+    ifelse(grepl("gb",pred_method) | grepl("lr",pred_method),
            preds <- get(paste0(pred_method,"_preds")),
            preds <- get(paste0(pred_method,"_preds"))[,2])
     if(length(unique(preds)) != 1) {
@@ -370,6 +393,10 @@ test_data <- master_data[holdouts]
   ct_list[,fold:=fold_num]
   ct_list[,rep:=rep_num]
   ct_list[,d_wt:=death_wt]
+
+  lr_list <- coef(summary(lr_fit))[,4]
+  lr_list <- data.frame(as.list(lr_list))
+  ## Reshape long the lr_list here
     
   ## Data.table with model_type, imp_type (gini or other), measure
   pull_imp <- function(pred_type) {
@@ -393,9 +420,10 @@ test_data <- master_data[holdouts]
       imp[,imp_type:="accuracy"]
     }
     imp[,model_type:=pred_type]
+    return(imp)
   }
-  imp_methods <- methods[!methods %in% "ct"]
-  importances <- rbindlist(lapply(imp_methods,pull_imp))
+  imp_methods <- methods[!methods %in% c("ct","lr")]
+  importances <- rbindlist(lapply(imp_methods,pull_imp),use.names=T)
 
   importances[,fold:=fold_num]
   importances[,rep:=rep_num]
