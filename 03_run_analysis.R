@@ -167,7 +167,7 @@ test_data <- master_data[holdouts]
     return(list(rf_fit,rf_pred))
   }
 
-if(Sys.info()[1] =="Unix") {
+if(Sys.info()[1] =="Linux") {
   system.time(rf_results <- run_par_rf(data=train_data,formula=test_formula,sample_weights=death_wt))
 } else if(Sys.info()[1] =="Windows")  {
   system.time(rf_results <- run_rf(data=train_data,formula=test_formula,sample_weights=death_wt,num_trees=50))
