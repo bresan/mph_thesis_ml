@@ -7,9 +7,10 @@ auc_dir <- "/homes/gngu/Thesis/data/03_perf"
 out_dir <- "/homes/gngu/Thesis/results"
 
 ## Identify max number of repetitions and folds
-max_reps <- 10
+max_reps <- 1
 max_folds <- 10 ## This must be over 1 otherwise everything will be in the test dataset
-death_wts <- c(5,10) # How much to weight the outcome of death in the 
+death_wts <- c(5,10) # How much to weight the outcome of death 
+admit_types <- c("all","admit_only")
 rep_fold_combos <- expand.grid(c(1:max_reps),c(1:max_folds))
 
 
@@ -74,8 +75,12 @@ setwd(code_dir)
 for(rep in 1:max_reps) {
   for(fold in 1:max_folds) {
     for(weight in death_wts) {
-        qsub(paste0("cv_",rep,"_",fold,"_",weight),code=paste0(code_dir,"/03_run_analysis.R"),pass=list(rep,fold,max_folds,weight),slots=7,submit=T,proj="")
+      for(admit_type in admit_types) {
+        qsub(paste0("cv_",rep,"_",fold,"_",weight,"_",admit_type),
+             code=paste0(code_dir,"/03_run_analysis.R"),
+             pass=list(rep,fold,max_folds,weight,admit_type),slots=7,submit=T,proj="")
       }
+    }
   }
 }
 
@@ -116,7 +121,12 @@ Sys.sleep(60*30)
 
 for(rep in 1:max_reps) {
   for(wt in death_wts) {
-    print(paste0("Checking folds for rep ",rep," and weight ",wt))
-    check_results(c(1:max_folds),auc_dir,prefix=paste0("hl_bins_",rep,"_"),postfix=paste0("_",wt,".csv"),sleep=60)
+    for(admit in admit_types) {
+      print(paste0("Checking folds for rep ",rep," and weight ",wt," and admit_type ",admit))
+      check_results(c(1:max_folds),auc_dir,
+                    prefix=paste0("hl_bins_",rep,"_"),
+                    postfix=paste0("_",wt,"_",admit,".csv"),
+                    sleep=60)
+    }
   }
 }

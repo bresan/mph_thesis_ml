@@ -12,6 +12,7 @@ if(Sys.info()[1] =="Windows") {
   fold_num <- 10    # The fold number that we should extract from the 10-fold CV to use as a holdout
   tot_folds <- 10   # The total number of folds that we are running (to make sure we specify the correct value for k in createFolds)
   death_wt <- 10    # The weights to use on death for the different methods
+  admit_type <- "admit_only" # Whether to run analyses on "all" variables or "admit_only" -- those only available at admission 
 } else if (Sys.info()[1] == "Darwin") { # Macintosh
   home_dir <- "/Users/Grant/Desktop/Thesis"
   
@@ -19,6 +20,7 @@ if(Sys.info()[1] =="Windows") {
   fold_num <- 10
   tot_folds <- 10
   death_wt <- 10
+  admit_type <- "admit_only"
 } else if (Sys.info()[1] == "Linux") {
   home_dir <- "/homes/gngu/Thesis"
   
@@ -26,19 +28,24 @@ if(Sys.info()[1] =="Windows") {
   fold_num <- as.numeric(commandArgs()[5])
   tot_folds <- as.numeric(commandArgs()[6])
   death_wt <- as.numeric(commandArgs()[7])
+  admit_type <- as.character(commandArgs()[8])
   
   print(commandArgs())
 }
 
-load(paste0(home_dir,"/data/02_prepped_data.RData"))
+ifelse(admit_type=="all",
+       load(paste0(home_dir,"/data/02_prepped_data.RData")),
+       load(paste0(home_dir,"/data/02_prepped_data_admitonly.RData")))
 data_dir <- paste0(home_dir,"/data")
 fig_dir <- paste0(data_dir,"/03_figures")
 code_dir <- paste0(home_dir,"/mph_thesis_ml")
 
+methods <- c("lr","dt","ct","rf","gb") # The two-letter abbreviations for all of the statistical methods
+
 # test_formula <- as.formula("death~.") # Refactor formula to see if computation goes quicker
 
 ## Create a common post-fix for standard saving of files with post-fixes by rep/fold/weight combinations
-postfix <- paste0(rep_num,"_",fold_num,"_",death_wt)
+postfix <- paste0(rep_num,"_",fold_num,"_",death_wt,"_",admit_type)
 
 ## Add a new R libraries location containing ROCR, xgboost, DiagrammeR, ResourceSelection, Ckmeans.1d.dp, and party packages (not installed on routine cluster)
 .libPaths(new = c(.libPaths(),paste0(home_dir,"/../r_libraries")))
@@ -54,7 +61,17 @@ library(reshape2) # Standard reshaping requirements
 source(paste0(code_dir,"/analysis_functions.R"))
 
 ## Set seed for reproducibility, toggled by repetition number
-set.seed(paste0(rep_num,"99",fold_num,"99",death_wt))
+## Keep the same rep/fold splits across death_wt and admission loops
+set.seed(paste0(rep_num,"99",fold_num,"99"))
+
+## Create function to easily add id variables for each loop (used to format output datasets)
+add_loopvars <- function(data) {
+  data[,fold:=fold_num]
+  data[,rep:=rep_num]
+  data[,d_wt:=death_wt]
+  data[,admit:=admit_type]
+  return(data)
+}
 
 ####################################################
 ## Format data
@@ -104,7 +121,7 @@ test_data <- master_data[holdouts]
   }
   system.time(dt_results <- run_dtree(data=train_data,formula=test_formula,death_weight=death_wt))
   dt_fit <- dt_results[1][[1]]
-  dt_preds <- dt_results[2][[1]]
+  dt_preds <- dt_results[2][[1]][,2]
 
 
 ## Conditional Inference Tree
@@ -123,7 +140,7 @@ test_data <- master_data[holdouts]
   system.time(ct_results <- run_ctree(data=train_data,formula=test_formula,death_weight=death_wt))
 
   ct_fit <- ct_results[1][[1]]
-  ct_preds <- ct_results[2][[1]]
+  ct_preds <- ct_results[2][[1]][,2]
 
 ## Run a random forest 
 ## Roughly 35 minutes for 100 trees -> ~3 hours for 500 trees
@@ -173,7 +190,7 @@ if(Sys.info()[1] =="Linux") {
   system.time(rf_results <- run_rf(data=train_data,formula=test_formula,sample_weights=death_wt,num_trees=50))
 }
   rf_fit <- rf_results[1][[1]]
-  rf_preds <- rf_results[2][[1]]
+  rf_preds <- rf_results[2][[1]][,2]
 
 ## Gradient Boosting Machines
 ## Roughly 20 seconds for 5 rounds and 3 folds
@@ -207,55 +224,31 @@ if(Sys.info()[1] =="Linux") {
   gb_imp <- gb_results[3][[1]]
  
 
-## 10-fold CV Random Forests and Gradient Boosting Machines
-#   library(caret); library(e1071)
-#   ctrl = trainControl(method="repeatedcv", number=10, repeats=5)
-#   trf = train(test_formula, data=test_data, method="rf", metric="Kappa",
-#               trControl=ctrl)
-#   
-#   system.time(train(test_formula, data=test_data, method="rf", metric="Kappa",
-#         trControl=ctrl))
-#   tgbm = train(test_formula, data=test_data, method="gbm", metric="Kappa",
-#                trControl=ctrl)
-# 
-#   ## Plot variable importance and RF fit
-#   plot(rf_fit,log="y")
-#   varImpPlot(rf_fit)
-
-
 ####################################################
 ## Plot results
   ## Calculate ROC curves
   test_data[,death_test:=as.numeric(death)-1] # Factor var is 1 for alive, 2 for dead -- convert to 0 for alive, 1 for dead
   
   library(ROCR)
-  pred_lr <- prediction(lr_preds,test_data[,death_test])
-  perf_lr <- performance(pred_lr,"tpr","fpr")
 
-  pred_dt <- prediction(dt_preds[,2],test_data[,death_test])
-  perf_dt = performance(pred_dt,"tpr","fpr")
-  
-  pred_ct = prediction(ct_preds[,2],test_data[,death_test])
-  perf_ct = performance(pred_ct,"tpr","fpr")
-  
-  pred_rf <- prediction(rf_preds[,2],test_data[,death_test])
-  perf_rf <- performance(pred_rf,"tpr","fpr")
-  
-  pred_gb <- prediction(gb_preds,test_data[,death_test])
-  perf_gb <- performance(pred_gb,"tpr","fpr")
+  ## First, save the ROC curves for use in plotting compiled 
+  extract_roc <- function(pred_type) {
+    pred <- prediction(get(paste0(pred_type,"_preds")),test_data[,death_test])
+    perf <- performance(pred,"tpr","fpr")
+    roc_results <- data.table(fpr=unlist(perf@x.values),tpr=unlist(perf@y.values),model_type=pred_type)
+    return(roc_results)
+  }
+  roc_results <- rbindlist(lapply(methods,extract_roc))
+  roc_results <- add_loopvars(roc_results)
+  write.csv(roc_results,paste0(data_dir,"/03_perf/roc_",postfix,".csv"),row.names=F) 
 
   ## Plot ROC curves of predictions
   pdf(paste0(fig_dir,"/results_",postfix,".pdf"))
-  plot(perf_lr, main="ROC", col="red")
-  plot(perf_dt, col="black",add=T)
-  plot(perf_ct, col="blue",add=T)
-  plot(perf_rf, col="green",add=T)
-  plot(perf_gb, col="brown",add=T)
-  abline(a=0,b=1)
-  legend("bottomleft", 
-         legend = c("Logistic Regression","Decision Tree","Conditional Tree","Random Forests","Gradient Boosting Machines"), 
-         lty = 1, cex=.5,
-         col = c("red","black","blue","green","brown"))
+  ggplot(data=roc_results,aes(x=fpr,y=tpr,color=model_type)) + 
+    geom_line() + 
+    scale_x_continuous(breaks=seq(0,1,.2)) + 
+    scale_y_continuous(breaks=seq(0,1,.2)) +
+    ggtitle("ROC Curve for selected methods")
 
   ## Plot decision tree results
   plotcp(dt_fit)
@@ -296,7 +289,6 @@ if(Sys.info()[1] =="Linux") {
     return(auc_dt)
   }
 
-  methods <- c("lr","dt","ct","rf","gb")
   auc_results <- rbindlist(lapply(methods,calc_auc))
 
   ## Calculate Accuracy at various cutoffs
@@ -326,9 +318,7 @@ if(Sys.info()[1] =="Linux") {
   ## Create function that takes in pred_method and returns a data.table with the statistic and p_value
   calc_hl <- function(pred_method) {
     library(ResourceSelection)
-    ifelse(grepl("gb",pred_method) | grepl("lr",pred_method),
-           preds <- get(paste0(pred_method,"_preds")),
-           preds <- get(paste0(pred_method,"_preds"))[,2])
+    preds <- get(paste0(pred_method,"_preds"))
     if(length(unique(preds)) != 1) {
       hl_results <- hoslem.test(test_data[,death_test],preds,g=15)
       results <- data.table(method=pred_method,stat=hl_results$statistic,p=hl_results$p.value)
@@ -342,9 +332,7 @@ if(Sys.info()[1] =="Linux") {
 
   calc_hl_bins <- function(pred_method) {
     library(ResourceSelection)
-    ifelse(grepl("gb",pred_method) | grepl("lr",pred_method),
-           preds <- get(paste0(pred_method,"_preds")),
-           preds <- get(paste0(pred_method,"_preds"))[,2])
+    preds <- get(paste0(pred_method,"_preds"))
     if(length(unique(preds)) != 1) {
       hl_results <- hoslem.test(test_data[,death_test],preds,g=15)
       bin_results <- data.frame(cbind(hl_results$observed,hl_results$expected))
@@ -390,14 +378,18 @@ if(Sys.info()[1] =="Linux") {
   traverse(ct_fit@tree)
   ct_list <- data.table(var_name=var_list,include=1,method="ct")
 
-  ct_list[,fold:=fold_num]
-  ct_list[,rep:=rep_num]
-  ct_list[,d_wt:=death_wt]
-
   lr_list <- coef(summary(lr_fit))[,4]
   lr_list <- data.frame(as.list(lr_list))
   ## Reshape long the lr_list here
-    
+  library(reshape2)
+  lr_list <- melt(lr_list)
+  lr_list <- lr_list[lr_list$value < .05,] 
+  lr_list <- data.table(var_name=as.character(lr_list$variable),include=1,method="lr")
+  
+  include_list <- rbindlist(list(ct_list,lr_list),use.names=T)
+  include_list <- add_loopvars(include_list)
+
+
   ## Data.table with model_type, imp_type (gini or other), measure
   pull_imp <- function(pred_type) {
     if(grepl("dt",pred_type) & !is.null(get(paste0(pred_type,"_fit"))$variable.importance)) {
@@ -424,33 +416,22 @@ if(Sys.info()[1] =="Linux") {
   }
   imp_methods <- methods[!methods %in% c("ct","lr")]
   importances <- rbindlist(lapply(imp_methods,pull_imp),use.names=T)
-
-  importances[,fold:=fold_num]
-  importances[,rep:=rep_num]
-  importances[,d_wt:=death_wt]
+  importances <- add_loopvars(importances)
   
-  write.csv(ct_list,paste0(data_dir,"/03_perf/ct_vars_",postfix,".csv"),row.names=F)
+  write.csv(include_list,paste0(data_dir,"/03_perf/include_vars_",postfix,".csv"),row.names=F)
   write.csv(importances,paste0(data_dir,"/03_perf/imp_",postfix,".csv"),row.names=F)
 
 ## Export csv for AUC, accuracy, and hosmer-lemeshow, along with fold# and rep#
-  auc_results[,fold:=fold_num]
-  auc_results[,rep:=rep_num]
-  auc_results[,d_wt:=death_wt]
+  auc_results <- add_loopvars(auc_results)
   write.csv(auc_results,paste0(data_dir,"/03_perf/auc_",postfix,".csv"),row.names=F)
 
-  acc_results[,fold:=fold_num]
-  acc_results[,rep:=rep_num]
-  acc_results[,d_wt:=death_wt]
+  acc_results <- add_loopvars(acc_results)
   write.csv(acc_results,paste0(data_dir,"/03_perf/acc_",postfix,".csv"),row.names=F)
 
-  hl_compiled[,fold:=fold_num]
-  hl_compiled[,rep:=rep_num]
-  hl_compiled[,d_wt:=death_wt]
+  hl_compiled <- add_loopvars(hl_results)
   write.csv(hl_compiled,paste0(data_dir,"/03_perf/hl_",postfix,".csv"),row.names=F)
     
-  hl_bins[,fold:=fold_num]
-  hl_bins[,rep:=rep_num]
-  hl_bins[,d_wt:=death_wt]
+  hl_bins <- add_loopvars(hl_bins)
   write.csv(hl_bins,paste0(data_dir,"/03_perf/hl_bins_",postfix,".csv"),row.names=F)
 
 

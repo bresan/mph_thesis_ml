@@ -157,4 +157,17 @@ check_missing(test_data)
 ## Output data objects to feed into random forest and logistic regression
 save.image(file=paste0(data_dir,"/02_prepped_data.RData"))
 
+## Now, output a dataset and test formula only with variables present at admission
+dx_admit_vars <- dx_vars[grepl("admit",dx_vars)]
+tr_admit_vars <- tr_vars[grepl("admit",tr_vars)]
+predict_vars <- c(dx_admit_vars,ss_vars,cv_vars,tr_admit_vars)
+
+pred_formula <- as.formula(paste("death~",paste(predict_vars,collapse="+")))
+outcome_vars <- "death"
+
+## Generate a test dataset with only signs and symptoms and 5000 random observations, for easier testing of methods
+test_predict_vars <- predict_vars
+test_formula <- as.formula(paste("death~",paste(test_predict_vars,collapse="+")))
+master_data <- master_data[,.SD,.SDcols=c(test_predict_vars,outcome_vars)]
+save.image(file=paste0(data_dir,"/02_prepped_data_admitonly.RData"))
 

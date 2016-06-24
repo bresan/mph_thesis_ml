@@ -25,6 +25,10 @@ f_vars <- expand.grid(c(1:max_reps),c(1:max_folds),death_wts)
 postfixes <- paste0("",f_vars$Var1,"_",f_vars$Var2,"_",f_vars$Var3,".csv")
 
 ## Import and analyze all datasets
+## ROC Curves
+roc_results <- data.table(rbindlist(lapply(postfixes,
+                                           function(x) fread(paste0(data_dir,"/03_perf/roc_",x)))))
+
 # AUC
 auc_results <- data.table(rbindlist(lapply(postfixes,
                                           function(x) fread(paste0(data_dir,"/03_perf/auc_",x)))))
@@ -54,8 +58,8 @@ var_imp <- var_imp[!is.na(var_name),]
 var_imp[,measure:=as.numeric(measure)]
 imp_summary <- var_imp[,list(measure=sum(measure)),by=list(var_name,imp_type,model_type,d_wt)]
 
-ct_incl <- data.table(rbindlist(lapply(postfixes,
-                                       function(x) fread(paste0(data_dir,"/03_perf/ct_vars_",x)))))
+include_vars <- data.table(rbindlist(lapply(postfixes,
+                                       function(x) fread(paste0(data_dir,"/03_perf/include_vars_",x)))))
 # A value of over 1 for the mean here means that it was included in more than one split on the CTree
 ct_summary <- ct_incl[,list(mean=sum(include)/(max_reps*max_folds)),by=list(var_name,method,d_wt)]
 
