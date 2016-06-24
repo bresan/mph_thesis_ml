@@ -283,7 +283,8 @@ if(Sys.info()[1] =="Linux") {
   ## Calculate AUC
   calc_auc <- function(pred_method) {
     library(ROCR)
-    auc_perf <- performance(get(paste0("pred_",pred_method)),measure="auc")
+    pred <- prediction(get(paste0(pred_type,"_preds")),test_data[,death_test])
+    auc_perf <- performance(pred,measure="auc")
     auc <- unlist(auc_perf@y.values)
     auc_dt <- data.table(pred_method,auc)
     return(auc_dt)
@@ -298,8 +299,8 @@ if(Sys.info()[1] =="Linux") {
     get_accuracy <- function(x) {
       acc_perf@y.values[[1]][max(which(acc_perf@x.values[[1]] >= x))]
     }
-    
-    acc_perf <- performance(get(paste0("pred_",pred_method)),measure="acc")
+    pred <- prediction(get(paste0(pred_type,"_preds")),test_data[,death_test])
+    acc_perf <- performance(pred,measure="acc")
 
     ## This gives the accuracy of the method at different cutoffs of predicted probability
     test_probs <- c(seq(.1,.5,.1),.75,.9)
