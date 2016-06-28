@@ -283,7 +283,7 @@ if(Sys.info()[1] =="Linux") {
   ## Calculate AUC
   calc_auc <- function(pred_method) {
     library(ROCR)
-    pred <- prediction(get(paste0(pred_type,"_preds")),test_data[,death_test])
+    pred <- prediction(get(paste0(pred_method,"_preds")),test_data[,death_test])
     auc_perf <- performance(pred,measure="auc")
     auc <- unlist(auc_perf@y.values)
     auc_dt <- data.table(pred_method,auc)
@@ -299,7 +299,7 @@ if(Sys.info()[1] =="Linux") {
     get_accuracy <- function(x) {
       acc_perf@y.values[[1]][max(which(acc_perf@x.values[[1]] >= x))]
     }
-    pred <- prediction(get(paste0(pred_type,"_preds")),test_data[,death_test])
+    pred <- prediction(get(paste0(pred_method,"_preds")),test_data[,death_test])
     acc_perf <- performance(pred,measure="acc")
 
     ## This gives the accuracy of the method at different cutoffs of predicted probability
@@ -343,6 +343,7 @@ if(Sys.info()[1] =="Linux") {
     } else {
       bin_results <- data.table(prob_range="0,1",method=paste0(pred_method),y0=NA,y1=NA,yhat0=NA,yhat1=NA)
     }
+    setcolorder(bin_results,c("prob_range","method","y0","y1","yhat0","yhat1"))
     return(bin_results)
   }
   hl_bins <- rbindlist(lapply(methods,calc_hl_bins))
@@ -413,6 +414,7 @@ if(Sys.info()[1] =="Linux") {
       imp[,imp_type:="accuracy"]
     }
     imp[,model_type:=pred_type]
+    setcolorder(imp,c("var_name","imp_type","measure","model_type"))
     return(imp)
   }
   imp_methods <- methods[!methods %in% c("ct","lr")]
@@ -429,7 +431,7 @@ if(Sys.info()[1] =="Linux") {
   acc_results <- add_loopvars(acc_results)
   write.csv(acc_results,paste0(data_dir,"/03_perf/acc_",postfix,".csv"),row.names=F)
 
-  hl_compiled <- add_loopvars(hl_results)
+  hl_compiled <- add_loopvars(hl_compiled)
   write.csv(hl_compiled,paste0(data_dir,"/03_perf/hl_",postfix,".csv"),row.names=F)
     
   hl_bins <- add_loopvars(hl_bins)
