@@ -93,14 +93,27 @@ test_data <- master_data[holdouts]
 ## Dealing with unbalanced data http://digitalassets.lib.berkeley.edu/sdtr/ucb/text/666.pdf
 
 ## Logistic Regression
-  run_logistic <- function(data,formula) {
-    lr_fit <- glm(formula,data=data,family = binomial(link = "logit"))
+  run_logistic <- function(data,formula,death_weight=10) {
+    ## First, resample with replacement to up-weight deaths by the factor specified
+    death_data <- data[death=="Yes",]
+    boot_indic <- sample(1:nrow(death_data), (nrow(death_data) * (death_weight-1)), replace=T)
+    boot_data <- death_data[boot_indic,]
+    lr_data <- rbindlist(list(data,boot_data),use.names=T)
+    
+    lr_fit <- glm(formula,data=lr_data,family = binomial(link = "logit"))
     lr_pred <- predict(lr_fit,test_data)
     return(list(lr_fit, lr_pred))
   }
-  system.time(lr_results <- run_logistic(data=train_data,formula=test_formula))
+  system.time(lr_results <- run_logistic(data=train_data,formula=test_formula,death_weight=death_wt))
   lr_fit <- lr_results[1][[1]]
   lr_preds <- lr_results[2][[1]]
+
+#   test_vars <- c(cv_vars,dx_vars[grepl("admit",dx_vars)])
+#   system.time(step <- step(lr_fit,trace=1,direction="backward"))
+#   test_formula <- as.formula(paste("death~",paste(test_vars,collapse="+")))
+#   lr_fit <- glm(test_formula,data=train_data,family=binomial(link="logit"))
+#   system.time(step <- step(lr_fit,trace=1,direction="backward"))           
+
 
 ## Logistic Regression with Backwards Selection
 ## new <- step(lr_fit)
@@ -175,9 +188,9 @@ test_data <- master_data[holdouts]
   run_car_rf <- function(data,formula,sample_weights) {
     library(doMC); library(caret)
     registerDoMC(cores=4)
-    control <- trainControl(method="repeatedcv",number=10,repeats=3,classProbs=T)
-    tunegrid <- expand.grid(ntree=c(50, 100, 200))
-    train_model <- train(formula=formula,data=data.frame(data),method=customRF,metric=metric,tunGrid=tunegrid,trControl=control)
+    control <- trainControl(method="cv",number=5)
+    tunegrid <- expand.grid(ntree=c(2, 4, 10))
+    train_model <- train(formula=formula,data=data.frame(data),method="rf",tunGrid=tunegrid,trControl=control)
     
     save(rf_fit,file=paste0(data_dir,"/03_fits/caret_fit_",postfix,".RData"))
     rf_pred = predict(rf_fit,type="prob",newdata=test_data)
@@ -217,7 +230,32 @@ if(Sys.info()[1] =="Linux") {
     boost_pred = predict(boost_fit,newdata=sparse_test)
     return(list(boost_fit,boost_pred,importance))
   }
+
+  run_car_boost <- function(tr_data,te_data,death_weight) {
+    library(xgboost); library(Matrix); library(caret)
+    #     library(Ckmeans.1d.dp) ## Needed for xgb.plot.importance
+    library(DiagrammeR) ## Needed for xgb.plot.tree
+    
+    xgb_features <- names(tr_data)[names(tr_data) != "death"]
+    sparse_train <- sparse.model.matrix(death~.-1, data=data.frame(tr_data))
+    sparse_test <- sparse.model.matrix(death~.-1, data=data.frame(te_data))
+    y <- tr_data[,as.numeric(death == "Yes")]
+    
+    # Here we use 10-fold cross-validation, repeating twice, and using random search for tuning hyper-parameters.
+    fitControl <- trainControl(method = "cv", number = 10, repeats = 2, search = "random")
+    # train a xgbTree model using caret::train
+    boost_fit <- train(test_formula, data = tr_data, method = "xgbTree", trControl = fitControl)
+    
+    print(boost_fit)
+#     importance <- xgb.importance(feature_names = xgb_features, model = boost_fit)
+#     print(importance)
+    
+#     boost_pred = predict(boost_fit,newdata=sparse_test)
+    return(list(boost_fit))
+  }
   
+#   system.time(gb_results <- run_car_boost(tr_data=train_data,te_data=test_data,death_weight=10))
+
   system.time(gb_results <- run_boost(tr_data=train_data,te_data=test_data,death_weight=10))
   gb_fit <- gb_results[1][[1]]
   gb_preds <- gb_results[2][[1]]
@@ -235,7 +273,7 @@ if(Sys.info()[1] =="Linux") {
   extract_roc <- function(pred_type) {
     pred <- prediction(get(paste0(pred_type,"_preds")),test_data[,death_test])
     perf <- performance(pred,"tpr","fpr")
-    roc_results <- data.table(fpr=unlist(perf@x.values),tpr=unlist(perf@y.values),model_type=pred_type)
+    roc_results <- data.table(fpr=unlist(perf@x.values),tpr=unlist(perf@y.values),pred_method=pred_type)
     return(roc_results)
   }
   roc_results <- rbindlist(lapply(methods,extract_roc))
@@ -244,7 +282,7 @@ if(Sys.info()[1] =="Linux") {
 
   ## Plot ROC curves of predictions
   pdf(paste0(fig_dir,"/results_",postfix,".pdf"))
-  ggplot(data=roc_results,aes(x=fpr,y=tpr,color=model_type)) + 
+  ggplot(data=roc_results,aes(x=fpr,y=tpr,color=pred_method)) + 
     geom_line() + 
     scale_x_continuous(breaks=seq(0,1,.2)) + 
     scale_y_continuous(breaks=seq(0,1,.2)) +
@@ -294,19 +332,19 @@ if(Sys.info()[1] =="Linux") {
 
   ## Calculate Accuracy at various cutoffs
   ## Cutoffs are the probability of event (death) predicted by each method
-  calc_accuracy <- function(pred_method) {
+  calc_accuracy <- function(pred_type) {
     library(ROCR)
     get_accuracy <- function(x) {
       acc_perf@y.values[[1]][max(which(acc_perf@x.values[[1]] >= x))]
     }
-    pred <- prediction(get(paste0(pred_method,"_preds")),test_data[,death_test])
+    pred <- prediction(get(paste0(pred_type,"_preds")),test_data[,death_test])
     acc_perf <- performance(pred,measure="acc")
 
     ## This gives the accuracy of the method at different cutoffs of predicted probability
     test_probs <- c(seq(.1,.5,.1),.75,.9)
     results <- unlist(do.call(rbind,lapply(test_probs,get_accuracy)))
     acc_dt <- data.table(cbind(
-      pred_type=rep(pred_method,length(test_probs)),
+      pred_method=rep(pred_type,length(test_probs)),
       pred_prob=test_probs,
       results))
     setnames(acc_dt,"V3","accuracy") # For some reason, renaming accuracy within cbind doesn't work
@@ -317,31 +355,31 @@ if(Sys.info()[1] =="Linux") {
 
   ## Calculate Hosmer-Lemeshow statistic
   ## Create function that takes in pred_method and returns a data.table with the statistic and p_value
-  calc_hl <- function(pred_method) {
+  calc_hl <- function(pred_type) {
     library(ResourceSelection)
-    preds <- get(paste0(pred_method,"_preds"))
+    preds <- get(paste0(pred_type,"_preds"))
     if(length(unique(preds)) != 1) {
       hl_results <- hoslem.test(test_data[,death_test],preds,g=15)
-      results <- data.table(method=pred_method,stat=hl_results$statistic,p=hl_results$p.value)
+      results <- data.table(pred_method=pred_type,stat=hl_results$statistic,p=hl_results$p.value)
     } else {
-      results <- data.table(method=pred_method,stat=NA,p=0)
+      results <- data.table(pred_method=pred_type,stat=NA,p=0)
     }
     return(results)  
   }
 
   hl_compiled <- rbindlist(lapply(methods,calc_hl))
 
-  calc_hl_bins <- function(pred_method) {
+  calc_hl_bins <- function(pred_type) {
     library(ResourceSelection)
     preds <- get(paste0(pred_method,"_preds"))
     if(length(unique(preds)) != 1) {
       hl_results <- hoslem.test(test_data[,death_test],preds,g=15)
       bin_results <- data.frame(cbind(hl_results$observed,hl_results$expected))
-      bin_results$method <- paste0(pred_method)
+      bin_results$pred_method <- paste0(pred_type)
       setDT(bin_results,keep.rownames=T)
       setnames(bin_results,"rn","prob_range")
     } else {
-      bin_results <- data.table(prob_range="0,1",method=paste0(pred_method),y0=NA,y1=NA,yhat0=NA,yhat1=NA)
+      bin_results <- data.table(prob_range="0,1",pred_method=paste0(pred_type),y0=NA,y1=NA,yhat0=NA,yhat1=NA)
     }
     setcolorder(bin_results,c("prob_range","method","y0","y1","yhat0","yhat1"))
     return(bin_results)
@@ -378,7 +416,7 @@ if(Sys.info()[1] =="Linux") {
   }
 
   traverse(ct_fit@tree)
-  ct_list <- data.table(var_name=var_list,include=1,method="ct")
+  ct_list <- data.table(var_name=var_list,include=1,pred_method="ct")
 
   lr_list <- coef(summary(lr_fit))[,4]
   lr_list <- data.frame(as.list(lr_list))
@@ -386,13 +424,13 @@ if(Sys.info()[1] =="Linux") {
   library(reshape2)
   lr_list <- melt(lr_list)
   lr_list <- lr_list[lr_list$value < .05,] 
-  lr_list <- data.table(var_name=as.character(lr_list$variable),include=1,method="lr")
+  lr_list <- data.table(var_name=as.character(lr_list$variable),include=1,pred_method="lr")
   
   include_list <- rbindlist(list(ct_list,lr_list),use.names=T)
   include_list <- add_loopvars(include_list)
 
 
-  ## Data.table with model_type, imp_type (gini or other), measure
+  ## Data.table with pred_method, imp_type (gini or other), measure
   pull_imp <- function(pred_type) {
     if(grepl("dt",pred_type) & !is.null(get(paste0(pred_type,"_fit"))$variable.importance)) {
       imp <- data.frame(measure=get(paste0(pred_type,"_fit"))$variable.importance)
@@ -413,8 +451,8 @@ if(Sys.info()[1] =="Linux") {
       setnames(imp,c("Feature","Gain"),c("var_name","measure"))
       imp[,imp_type:="accuracy"]
     }
-    imp[,model_type:=pred_type]
-    setcolorder(imp,c("var_name","imp_type","measure","model_type"))
+    imp[,pred_method:=pred_type]
+    setcolorder(imp,c("var_name","imp_type","measure","pred_method"))
     return(imp)
   }
   imp_methods <- methods[!methods %in% c("ct","lr")]
