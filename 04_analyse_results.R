@@ -63,7 +63,6 @@ hl_bin_results <- data.table(rbindlist(lapply(postfixes,
 hl_bin_results <- merge(hl_bin_results,best_models,by=c("pred_method","d_wt","admit"))
 
 # Variable Importance/Inclusion
-# Need to regenerate due to poor rbinding of GB results
 var_imp <- data.table(rbindlist(lapply(postfixes,
                                       function(x) fread(paste0(data_dir,"/03_perf/imp_",x)))))
 var_imp <- var_imp[!is.na(var_name),]

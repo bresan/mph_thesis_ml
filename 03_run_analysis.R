@@ -87,7 +87,7 @@ train_data <- master_data[-holdouts]
 test_data <- master_data[holdouts]
 
 ## First, resample with replacement to up-weight deaths by the factor specified
-death_data <- data[death=="Yes",]
+death_data <- train_data[death=="Yes",]
 boot_indic <- sample(1:nrow(death_data), (nrow(death_data) * (death_wt-1)), replace=T)
 boot_data <- death_data[boot_indic,]
 train_data <- rbindlist(list(train_data,boot_data),use.names=T)
@@ -100,7 +100,7 @@ train_data <- rbindlist(list(train_data,boot_data),use.names=T)
 
 ## Logistic Regression
   run_logistic <- function(data,formula) {
-    lr_fit <- glm(formula,data=lr_data,family = binomial(link = "logit"))
+    lr_fit <- glm(formula,data=data,family = binomial(link = "logit"))
     lr_pred <- predict(lr_fit,test_data)
     
     lr_coefs <- data.frame(lr_fit$coefficients)
@@ -147,6 +147,13 @@ train_data <- rbindlist(list(train_data,boot_data),use.names=T)
     ct_pred = predict(ct_fit,type="prob",newdata=test_data)
     ct_pred <- do.call(rbind,ct_pred) # Convert from a list of lists to a matrix
     return(list(ct_fit,ct_pred))
+  }
+  run_car_ctree <- function(data,formula) {
+    library(caret)
+    ct_fit <- train(formula, data=data,method='ctree')
+    ct_imp <- varImp(ct_fit)
+    ct_pred <- predict(ct_fit,type="prob",newdata=test_data)
+    return(list(ct_fit,ct_pred,ct_imp))
   }
   system.time(ct_results <- run_ctree(data=train_data,formula=test_formula))
 
@@ -224,7 +231,8 @@ if(Sys.info()[1] =="Linux") {
   }
 
   run_car_boost <- function(tr_data,te_data) {
-    library(xgboost); library(Matrix); library(caret);library(pROC)
+    library(xgboost); library(Matrix); library(caret);library(pROC);library(doMC)
+    registerDoMC(cores = 2)
     
     xgb_features <- names(tr_data)[names(tr_data) != "death"]
     

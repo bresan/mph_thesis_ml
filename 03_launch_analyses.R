@@ -91,7 +91,7 @@ for(rep in 1:max_reps) {
 
 ########################################################
 ## Check for results and combine them
-check_results <- function(locations,check_dir,prefix="",postfix,sleep=30) {
+check_results <- function(locations,check_dir,prefix="",postfix,sleep=60) {
   counter <- 0
   time_counter <- 0
   while(counter == 0) {
@@ -120,8 +120,8 @@ check_results <- function(locations,check_dir,prefix="",postfix,sleep=30) {
   }
 }
 
-## Wait 30 minutes, then start checking
-Sys.sleep(60*30)
+## Wait 60 minutes, then start checking
+Sys.sleep(60*60)
 
 for(rep in 1:max_reps) {
   for(wt in death_wts) {
@@ -130,7 +130,7 @@ for(rep in 1:max_reps) {
       check_results(c(1:max_folds),auc_dir,
                     prefix=paste0("hl_bins_",rep,"_"),
                     postfix=paste0("_",wt,"_",admit,".csv"),
-                    sleep=60)
+                    sleep=120)
     }
   }
 }
