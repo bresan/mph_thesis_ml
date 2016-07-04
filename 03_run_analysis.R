@@ -192,7 +192,6 @@ test_data <- master_data[holdouts]
     tunegrid <- expand.grid(ntree=c(2, 4, 10))
     train_model <- train(formula=formula,data=data.frame(data),method="rf",tunGrid=tunegrid,trControl=control)
     
-    save(rf_fit,file=paste0(data_dir,"/03_fits/caret_fit_",postfix,".RData"))
     rf_pred = predict(rf_fit,type="prob",newdata=test_data)
     return(list(rf_fit,rf_pred))
   }
@@ -233,13 +232,8 @@ if(Sys.info()[1] =="Linux") {
 
   run_car_boost <- function(tr_data,te_data,death_weight) {
     library(xgboost); library(Matrix); library(caret)
-    #     library(Ckmeans.1d.dp) ## Needed for xgb.plot.importance
-    library(DiagrammeR) ## Needed for xgb.plot.tree
     
     xgb_features <- names(tr_data)[names(tr_data) != "death"]
-    sparse_train <- sparse.model.matrix(death~.-1, data=data.frame(tr_data))
-    sparse_test <- sparse.model.matrix(death~.-1, data=data.frame(te_data))
-    y <- tr_data[,as.numeric(death == "Yes")]
     
     # Here we use 10-fold cross-validation, repeating twice, and using random search for tuning hyper-parameters.
     fitControl <- trainControl(method = "cv", number = 10, repeats = 2, search = "random")
@@ -247,19 +241,26 @@ if(Sys.info()[1] =="Linux") {
     boost_fit <- train(test_formula, data = tr_data, method = "xgbTree", trControl = fitControl)
     
     print(boost_fit)
-#     importance <- xgb.importance(feature_names = xgb_features, model = boost_fit)
-#     print(importance)
-    
-#     boost_pred = predict(boost_fit,newdata=sparse_test)
-    return(list(boost_fit))
+
+    car_preds <- predict(boost_fit,newdata=te_data)
+
+    car_imp <- varImp(boost_fit)
+    car_imp <- car_imp$importance
+    setDT(car_imp, keep.rownames=T)
+    setnames(car_imp,c("rn","Overall"),c("var_name","measure"))
+
+    return(list(boost_fit,car_preds,car_imp))
   }
   
-#   system.time(gb_results <- run_car_boost(tr_data=train_data,te_data=test_data,death_weight=10))
-
   system.time(gb_results <- run_boost(tr_data=train_data,te_data=test_data,death_weight=10))
   gb_fit <- gb_results[1][[1]]
   gb_preds <- gb_results[2][[1]]
   gb_imp <- gb_results[3][[1]]
+
+  system.time(cg_results <- run_car_boost(tr_data=train_data,te_data=test_data,death_weight=10))
+  cg_fit <- cg_results[1][[1]]
+  cg_preds <- cg_results[2][[1]]
+  cg_imp <- cg_results[3][[1]]
  
 
 ####################################################
@@ -371,7 +372,7 @@ if(Sys.info()[1] =="Linux") {
 
   calc_hl_bins <- function(pred_type) {
     library(ResourceSelection)
-    preds <- get(paste0(pred_method,"_preds"))
+    preds <- get(paste0(pred_type,"_preds"))
     if(length(unique(preds)) != 1) {
       hl_results <- hoslem.test(test_data[,death_test],preds,g=15)
       bin_results <- data.frame(cbind(hl_results$observed,hl_results$expected))
@@ -381,7 +382,7 @@ if(Sys.info()[1] =="Linux") {
     } else {
       bin_results <- data.table(prob_range="0,1",pred_method=paste0(pred_type),y0=NA,y1=NA,yhat0=NA,yhat1=NA)
     }
-    setcolorder(bin_results,c("prob_range","method","y0","y1","yhat0","yhat1"))
+    setcolorder(bin_results,c("prob_range","pred_method","y0","y1","yhat0","yhat1"))
     return(bin_results)
   }
   hl_bins <- rbindlist(lapply(methods,calc_hl_bins))

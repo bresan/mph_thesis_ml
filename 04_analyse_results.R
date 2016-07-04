@@ -26,6 +26,9 @@ f_vars <- expand.grid(c(1:max_reps),c(1:max_folds),death_wts,admit_types)
 
 postfixes <- paste0("",f_vars$Var1,"_",f_vars$Var2,"_",f_vars$Var3,"_",f_vars$Var4,".csv")
 
+## Bring in method labels (to go from two-letter short labels to table/graph labels)
+method_labels <- data.table(fread(paste0(data_dir,"/method_map.csv")))
+
 ## Import and analyze all datasets
 ## ROC Curves
 roc_results <- data.table(rbindlist(lapply(postfixes,
@@ -35,10 +38,10 @@ roc_results <- data.table(rbindlist(lapply(postfixes,
 auc_results <- data.table(rbindlist(lapply(postfixes,
                                           function(x) fread(paste0(data_dir,"/03_perf/auc_",x)))))
 auc_summary <- auc_results[,list(mean=mean(auc),lower=quantile(auc,.025),upper=quantile(auc,.975)),by=list(pred_method,d_wt,admit)]
-auc_summary[,auc_max:=max(auc),by=list(pred_method,admit)]
+auc_summary[,auc_max:=max(mean),by=list(pred_method,admit)]
 best_auc <- auc_summary[mean==auc_max]
 best_auc <- unique(best_auc,by=c("pred_method","admit"))
-best_models <- best_auc[list(pred_method,d_wt,admit)]
+best_models <- best_auc[,list(pred_method,d_wt,admit)]
 
 # Accuracy
 acc_results <- data.table(rbindlist(lapply(postfixes,
@@ -75,8 +78,8 @@ include_summary <- include_vars[,list(mean=sum(include)/(max_reps*max_folds)),by
 include_summary <- merge(include_summary,best_models,by=c("pred_method","d_wt","admit"))
 
 ## Create summary measures of variable importance
-imp_summary <- imp_summary[order(pred_method,imp_type,admit,d_wt,-measure)]
-imp_summary <- imp_summary[,rank:=rank(-measure),by=list(pred_method,imp_type,admit,d_wt)]
+imp_summary <- imp_summary[order(pred_method,imp_type,admit,-measure)]
+imp_summary <- imp_summary[,rank:=rank(-measure,ties.method="min"),by=list(pred_method,imp_type,admit)]
 imp_top_15 <- imp_summary[rank <= 15]
 
 format_vartypes <- function(data) {
@@ -89,15 +92,15 @@ format_vartypes <- function(data) {
 }
 
 imp_top_15 <- format_vartypes(imp_top_15)
-imp_top_15 <- imp_top_15[,combined_varname := sprintf("%02d %s",rank,var_name)]
+imp_top_15 <- imp_top_15[,combined_varname := sprintf("%.1f %s",rank,var_name)]
 
 ## Graph of variables included in the ctree and logistic regression (significance)
 incl_test <- copy(include_summary)
 incl_test <- incl_test[order(pred_method,admit,d_wt,-mean)]
-incl_test <- incl_test[,rank:=rank(-mean),by=list(pred_method,admit,d_wt)]
-incl_test <- incl_test[,min_rank:=min(rank),by=list(pred_method,admit,d_wt)]
+incl_test <- incl_test[,rank:=rank(-mean),by=list(pred_method,admit)]
+incl_test <- incl_test[,min_rank:=min(rank,ties.method="min"),by=list(pred_method,admit)]
 incl_top_15 <- incl_test[rank <=15 | rank == min_rank]
-incl_top_15 <- incl_top_15[,combined_varname := sprintf("%02d %s",rank,var_name)]
+incl_top_15 <- incl_top_15[,combined_varname := sprintf("%.1f %s",rank,var_name)]
 incl_top_15 <- format_vartypes(incl_top_15)
 
 ## For Heatmap of variable importance/inclusion, do some re-coding to make it sensible
@@ -113,50 +116,70 @@ incl_heat <- incl_heat[grepl("te_malaria_test",var_name),var_name:="te_malaria_t
 incl_heat <- incl_heat[grepl("dx_malaria_final",var_name),var_name:="dx_malaria_final"]
 incl_heat <- incl_heat[grepl("ss_jaundice",var_name),var_name:="ss_jaundice"]
 
-imp_heat <- imp_top_15[,model_expanded:=paste0(pred_method,"_",imp_type)]
-setnames(incl_heat,"method","model_expanded")
-heat_data <- rbindlist(list(incl_heat[,list(var_name,model_expanded,d_wt,admit,rank)],
-                            imp_heat[,list(var_name,model_expanded,d_wt,admit,rank)]),
+## Format inclusion and importance datasets similarly
+imp_heat <- merge(imp_top_15,method_labels,by="pred_method")
+imp_heat[,pred_method:=NULL]
+imp_heat <- imp_heat[,model_expanded:=paste0(Method,"_",imp_type)]
+
+incl_heat[pred_method=="lr",rank:=7.5] # All logistic is included in everything
+incl_heat <- merge(incl_heat,method_labels,by="pred_method")
+incl_heat[,pred_method:=NULL]
+setnames(incl_heat,"Method","model_expanded")
+heat_data <- rbindlist(list(incl_heat[,list(var_name,model_expanded,admit,rank)],
+                            imp_heat[,list(var_name,model_expanded,admit,rank)]),
                        use.names=T)
-heat_data <- heat_data[model_expanded=="lr",rank:=7.5]
 
 heat_template <- data.table(expand.grid(var_name=unique(heat_data$var_name),
                                         model_expanded=unique(heat_data$model_expanded),
-                                        d_wt=unique(heat_data$d_wt),
                                         admit=unique(heat_data$admit)))
-heat_template <- merge(heat_template,heat_data,by=c("var_name","model_expanded","d_wt","admit"),all.x=T)
+heat_template <- merge(heat_template,heat_data,by=c("var_name","model_expanded","admit"),all.x=T)
+
+## Add method labels onto all output datasets
+format_methods <- function(data) {
+  ## Re-assign variables instead of merging so that the changes will "stick" easily
+  for(type in unique(method_labels[,pred_method])) {
+    proper_name <- unique(method_labels[pred_method==type,Method])
+    data[pred_method==type,pred_method:=proper_name]
+  }
+  setnames(data,"pred_method","Method")
+}
+
+for(d in c("best_auc","auc_summary","acc_summary","auc_results","roc_results",
+           "hl_summary","imp_summary","include_summary",
+           "imp_top_15","incl_top_15","best_models")) {
+  format_methods(get(d))
+}
 
 ## Output results
-save(auc_summary,acc_summary,hl_summary,
+save(best_auc,auc_summary,acc_summary,hl_summary,
      imp_summary,include_summary,
      imp_top_15,incl_top_15,heat_template,file=paste0(out_dir,"/results.RData"))
 
 
 ## Save ROC graphs with all 100 draws and median draw highlighted in red
-auc_results[,median:=quantile(auc,.5,type=3),by=list(pred_method,d_wt,admit)] # This chooses a median by defaulting to nearest even order statistic
-auc_meds <- auc_results[auc==median,list(fold,rep,d_wt,admit,pred_method)]
-auc_meds <- auc_meds[!duplicated(auc_meds[,list(d_wt,admit,pred_method)]),]
+auc_results[,median:=quantile(auc,.5,type=3),by=list(Method,d_wt,admit)] # This chooses a median by defaulting to nearest even order statistic
+auc_meds <- auc_results[auc==median,list(fold,rep,d_wt,admit,Method)]
+auc_meds <- auc_meds[!duplicated(auc_meds[,list(d_wt,admit,Method)]),]
 auc_meds[,median:=1]
-setnames(auc_meds,"pred_method","model_type")
-roc_results <- merge(roc_results,auc_meds,by=c("d_wt","admit","model_type","fold","rep"),all.x=T)
+roc_results <- merge(roc_results,auc_meds,by=c("d_wt","admit","Method","fold","rep"),all.x=T)
 roc_results[is.na(median),median:=0]
+roc_results <- merge(roc_results,best_models,by=c("Method","admit","d_wt"))
 
 png(file=paste0(fig_dir,"/roc_admit.png"),width=700,height=500)
 plot <- ggplot(NULL,aes(x=fpr,y=tpr, group=interaction(rep,fold))) +
   geom_line(data=roc_results[median == 0,],alpha=.1) +
   geom_line(data=roc_results[median == 1,], color="red") +
-  facet_wrap(~ admit+model_type, ncol=5) +
+  facet_wrap(~ admit+Method, ncol=5) +
   ggtitle(paste0("ROC by dataset (admission-only vs. all) and model, one line per rep/fold combination"))
 print(plot)
 dev.off()
 
-
 ## Graph just the median ROC curves
-png(file=paste0(fig_dir,"roc_median.png"),width=700,height=500)
+png(file=paste0(fig_dir,"/roc_median.png"),width=700,height=500)
 
-plot <- ggplot(data=roc_results[median == 1,],aes(x=fpr,y=tpr,color=model_type)) +
+plot <- ggplot(data=roc_results[median == 1,],aes(x=fpr,y=tpr,color=Method)) +
 geom_line() +
-facet_wrap(~admit+d_wt) +
+facet_wrap(~admit) +
 ggtitle("Median (by AUC) ROC curves of all tested methods \n By dataset (admission-data only or all data) and death weight (5 or 10)") 
 print(plot)
 
