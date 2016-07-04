@@ -61,6 +61,10 @@ qsub <- function(jobname, code, hold=NULL, pass=NULL, slots=1, submit=F, log=T, 
 ########################################################
 ## Delete existing output from analyses
 system(paste0("perl -e 'unlink <",auc_dir,"/*.csv>' "))
+system(paste0("perl -e 'unlink <",auc_dir,"/auc/*.csv>' "))
+system(paste0("perl -e 'unlink <",auc_dir,"/acc/*.csv>' "))
+system(paste0("perl -e 'unlink <",auc_dir,"/var_imp/*.csv>' "))
+system(paste0("perl -e 'unlink <",auc_dir,"/hl/*.csv>' "))
 
 # Alternative if no perl:
 # system(paste0("rm ",data_dir,"/*.csv"))

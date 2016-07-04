@@ -40,7 +40,7 @@ data_dir <- paste0(home_dir,"/data")
 fig_dir <- paste0(data_dir,"/03_figures")
 code_dir <- paste0(home_dir,"/mph_thesis_ml")
 
-methods <- c("lr","dt","ct","rf","gb") # The two-letter abbreviations for all of the statistical methods
+methods <- c("lr","dt","ct","rf","gb","cg") # The two-letter abbreviations for all of the statistical methods
 
 # test_formula <- as.formula("death~.") # Refactor formula to see if computation goes quicker
 
@@ -86,6 +86,12 @@ holdouts <- createFolds(data_indices,k=tot_folds,list=T,returnTrain=F)[[fold_num
 train_data <- master_data[-holdouts]
 test_data <- master_data[holdouts]
 
+## First, resample with replacement to up-weight deaths by the factor specified
+death_data <- data[death=="Yes",]
+boot_indic <- sample(1:nrow(death_data), (nrow(death_data) * (death_wt-1)), replace=T)
+boot_data <- death_data[boot_indic,]
+train_data <- rbindlist(list(train_data,boot_data),use.names=T)
+
 # save(train_data,file=paste0(data_dir,"/test_split_",postfix,".RData"))
 
 ####################################################
@@ -93,20 +99,20 @@ test_data <- master_data[holdouts]
 ## Dealing with unbalanced data http://digitalassets.lib.berkeley.edu/sdtr/ucb/text/666.pdf
 
 ## Logistic Regression
-  run_logistic <- function(data,formula,death_weight=10) {
-    ## First, resample with replacement to up-weight deaths by the factor specified
-    death_data <- data[death=="Yes",]
-    boot_indic <- sample(1:nrow(death_data), (nrow(death_data) * (death_weight-1)), replace=T)
-    boot_data <- death_data[boot_indic,]
-    lr_data <- rbindlist(list(data,boot_data),use.names=T)
-    
+  run_logistic <- function(data,formula) {
     lr_fit <- glm(formula,data=lr_data,family = binomial(link = "logit"))
     lr_pred <- predict(lr_fit,test_data)
-    return(list(lr_fit, lr_pred))
+    
+    lr_coefs <- data.frame(lr_fit$coefficients)
+    setDT(lr_coefs,keep.rownames=T)
+    setnames(lr_coefs,c("rn","lr_fit.coefficients"),c("var_name","beta"))
+    
+    return(list(lr_fit,lr_pred,lr_coefs))
   }
-  system.time(lr_results <- run_logistic(data=train_data,formula=test_formula,death_weight=death_wt))
+  system.time(lr_results <- run_logistic(data=train_data,formula=test_formula))
   lr_fit <- lr_results[1][[1]]
   lr_preds <- lr_results[2][[1]]
+  lr_coefs <- lr_results[3][[1]]
 
 #   test_vars <- c(cv_vars,dx_vars[grepl("admit",dx_vars)])
 #   system.time(step <- step(lr_fit,trace=1,direction="backward"))
@@ -121,36 +127,28 @@ test_data <- master_data[holdouts]
 
 
 ## Decision Tree
-  run_dtree <- function(data,formula,death_weight=10) {
+  run_dtree <- function(data,formula) {
     library(rpart)
-    data_new <- copy(data)
-    data_new[death=="No",weight:=1]
-    data_new[death=="Yes",weight:=death_weight]
     ## Create a regression tree using rpart    
-#     rt_fit <- rpart(formula,data=data.frame(data_new),control=rpart.control(),weights=weight,parms=list(split="information", loss=matrix(c(0,death_weight,1,0), byrow=TRUE, nrow=2)))
-    rt_fit <- rpart(formula,data=data.frame(data_new),control=rpart.control(),weights=weight)
+    rt_fit <- rpart(formula,data=data.frame(data),control=rpart.control())
     rt_pred <- predict(rt_fit,test_data)
     return(list(rt_fit, rt_pred))
   }
-  system.time(dt_results <- run_dtree(data=train_data,formula=test_formula,death_weight=death_wt))
+  system.time(dt_results <- run_dtree(data=train_data,formula=test_formula))
   dt_fit <- dt_results[1][[1]]
   dt_preds <- dt_results[2][[1]][,2]
 
 
 ## Conditional Inference Tree
-  run_ctree <- function(data,formula,death_weight=1) {
+  run_ctree <- function(data,formula) {
     ## Use party package
-    library(party)
-    data_new <- copy(data)
-    data_new[death=="No",weight:=1]
-    data_new[death=="Yes",weight:=death_weight]
-    
-    ct_fit = ctree(formula,data=data.frame(data_new),controls=ctree_control(maxdepth=3),weights=c(data_new[,weight]))
+    library(party)    
+    ct_fit = ctree(formula,data=data.frame(data),controls=ctree_control(maxdepth=3))
     ct_pred = predict(ct_fit,type="prob",newdata=test_data)
     ct_pred <- do.call(rbind,ct_pred) # Convert from a list of lists to a matrix
     return(list(ct_fit,ct_pred))
   }
-  system.time(ct_results <- run_ctree(data=train_data,formula=test_formula,death_weight=death_wt))
+  system.time(ct_results <- run_ctree(data=train_data,formula=test_formula))
 
   ct_fit <- ct_results[1][[1]]
   ct_preds <- ct_results[2][[1]][,2]
@@ -158,16 +156,16 @@ test_data <- master_data[holdouts]
 ## Run a random forest 
 ## Roughly 35 minutes for 100 trees -> ~3 hours for 500 trees
 ## http://stats.stackexchange.com/questions/37370/random-forest-computing-time-in-r
-  run_rf <- function(data,num_trees,formula,sample_weights) {
+  run_rf <- function(data,num_trees,formula) {
     library(randomForest)
-    rf_fit <- randomForest(formula,data=data.frame(data),ntree=num_trees,replace=T,keep.forest=T,importance=T,classwt=c(1,sample_weights))
+    rf_fit <- randomForest(formula,data=data.frame(data),ntree=num_trees,replace=T,keep.forest=T,importance=T)
     
     ## Get raw predictive accuracy, and generate predictions for ROC curves
     rf_pred = predict(rf_fit,type="prob",newdata=test_data)
     return(list(rf_fit,rf_pred))
   }
 
-  run_par_rf <- function(data,formula,sample_weights) {
+  run_par_rf <- function(data,formula) {
     library(doMC)
     library(randomForest)
     registerDoMC(cores=4)
@@ -178,9 +176,9 @@ test_data <- master_data[holdouts]
     data_new[,death:=NULL]
     rf_fit <- foreach(ntree=rep(200,4), .combine=combine, .multicombine=TRUE,
                   .packages='randomForest') %dopar% {
-                    randomForest(x=data_new,y=outcome,ntree=ntree,replace=T,keep.forest=T,importance=T,classwt=c(1,sample_weights))
+                    randomForest(x=data_new,y=outcome,ntree=ntree,replace=T,keep.forest=T,importance=T)
                   }
-    save(rf_fit,file=paste0(data_dir,"/03_fits/rf_fit_",postfix,".RData"))
+#     save(rf_fit,file=paste0(data_dir,"/03_fits/rf_fit_",postfix,".RData"))
     rf_pred = predict(rf_fit,type="prob",newdata=test_data)
     return(list(rf_fit,rf_pred))
   }
@@ -197,19 +195,17 @@ test_data <- master_data[holdouts]
   }
 
 if(Sys.info()[1] =="Linux") {
-  system.time(rf_results <- run_par_rf(data=train_data,formula=test_formula,sample_weights=death_wt))
+  system.time(rf_results <- run_par_rf(data=train_data,formula=test_formula))
 } else if(Sys.info()[1] =="Windows")  {
-  system.time(rf_results <- run_rf(data=train_data,formula=test_formula,sample_weights=death_wt,num_trees=50))
+  system.time(rf_results <- run_rf(data=train_data,formula=test_formula,num_trees=50))
 }
   rf_fit <- rf_results[1][[1]]
   rf_preds <- rf_results[2][[1]][,2]
 
 ## Gradient Boosting Machines
 ## Roughly 20 seconds for 5 rounds and 3 folds
-  run_boost <- function(tr_data,te_data,death_weight) {
+  run_boost <- function(tr_data,te_data) {
     library(xgboost); library(Matrix)
-#     library(Ckmeans.1d.dp) ## Needed for xgb.plot.importance
-    library(DiagrammeR) ## Needed for xgb.plot.tree
     
     xgb_features <- names(tr_data)[names(tr_data) != "death"]
     sparse_train <- sparse.model.matrix(death~.-1, data=data.frame(tr_data))
@@ -220,29 +216,27 @@ if(Sys.info()[1] =="Linux") {
     
     # This only works with sparse_matrix but not the DMatrix -- not really sure what's going on here
     # See http://stackoverflow.com/questions/37057326/grid-tuning-xgboost-with-missing-data for another case of this
-    boost_fit = xgboost(data=sparse_train,label=y,nrounds=200,nfold=10,scale_pos_weight=death_weight,objective="binary:logistic") 
-    
-    print(summary(boost_fit))
+    boost_fit = xgboost(data=sparse_train,label=y,nrounds=200,nfold=10,objective="binary:logistic") 
     importance <- xgb.importance(feature_names = xgb_features, model = boost_fit)
-    print(importance)
-    
     boost_pred = predict(boost_fit,newdata=sparse_test)
+
     return(list(boost_fit,boost_pred,importance))
   }
 
-  run_car_boost <- function(tr_data,te_data,death_weight) {
-    library(xgboost); library(Matrix); library(caret)
+  run_car_boost <- function(tr_data,te_data) {
+    library(xgboost); library(Matrix); library(caret);library(pROC)
     
     xgb_features <- names(tr_data)[names(tr_data) != "death"]
     
     # Here we use 10-fold cross-validation, repeating twice, and using random search for tuning hyper-parameters.
-    fitControl <- trainControl(method = "cv", number = 10, repeats = 2, search = "random")
-    # train a xgbTree model using caret::train
-    boost_fit <- train(test_formula, data = tr_data, method = "xgbTree", trControl = fitControl)
+    fitControl <- trainControl(method = "cv", number = 10, repeats = 2, search = "random",
+                               summaryFunction = twoClassSummary,classProbs=T)
     
-    print(boost_fit)
-
-    car_preds <- predict(boost_fit,newdata=te_data)
+    # train a xgbTree model using caret::train
+    boost_fit <- train(test_formula, data = tr_data, method = "xgbTree", trControl = fitControl,metric = "ROC")
+    
+    car_preds <- predict(boost_fit,newdata=te_data,type="prob")
+    car_preds <- car_preds[,2]
 
     car_imp <- varImp(boost_fit)
     car_imp <- car_imp$importance
@@ -252,12 +246,12 @@ if(Sys.info()[1] =="Linux") {
     return(list(boost_fit,car_preds,car_imp))
   }
   
-  system.time(gb_results <- run_boost(tr_data=train_data,te_data=test_data,death_weight=10))
+  system.time(gb_results <- run_boost(tr_data=train_data,te_data=test_data))
   gb_fit <- gb_results[1][[1]]
   gb_preds <- gb_results[2][[1]]
   gb_imp <- gb_results[3][[1]]
 
-  system.time(cg_results <- run_car_boost(tr_data=train_data,te_data=test_data,death_weight=10))
+  system.time(cg_results <- run_car_boost(tr_data=train_data,te_data=test_data))
   cg_fit <- cg_results[1][[1]]
   cg_preds <- cg_results[2][[1]]
   cg_imp <- cg_results[3][[1]]
@@ -279,45 +273,39 @@ if(Sys.info()[1] =="Linux") {
   }
   roc_results <- rbindlist(lapply(methods,extract_roc))
   roc_results <- add_loopvars(roc_results)
-  write.csv(roc_results,paste0(data_dir,"/03_perf/roc_",postfix,".csv"),row.names=F) 
+  write.csv(roc_results,paste0(data_dir,"/03_perf/auc/roc_",postfix,".csv"),row.names=F) 
 
-  ## Plot ROC curves of predictions
-  pdf(paste0(fig_dir,"/results_",postfix,".pdf"))
-  ggplot(data=roc_results,aes(x=fpr,y=tpr,color=pred_method)) + 
-    geom_line() + 
-    scale_x_continuous(breaks=seq(0,1,.2)) + 
-    scale_y_continuous(breaks=seq(0,1,.2)) +
-    ggtitle("ROC Curve for selected methods")
-
-  ## Plot decision tree results
-  plotcp(dt_fit)
-#   plot(dt_fit, uniform=T)
-#   text(dt_fit,use.n=T,all=T,cex=.8)
-  
-  ## Plot conditional inference tree results
-  plot(ct_fit,main="Conditional Inference Tree")
-  
-  ## Plot random forest results
-  varImpPlot(rf_fit)
-  
-  ## Plot xgboost variable importance (top 20)
-  gb_imp <- gb_imp[order(-gb_imp$Gain),]
-  
-#   print(xgb.plot.importance(gb_imp[1:20,]))
-  dev.off()
-  
+#   ## Plot ROC curves of predictions
+#   pdf(paste0(fig_dir,"/results_",postfix,".pdf"))
+#   ggplot(data=roc_results,aes(x=fpr,y=tpr,color=pred_method)) + 
+#     geom_line() + 
+#     scale_x_continuous(breaks=seq(0,1,.2)) + 
+#     scale_y_continuous(breaks=seq(0,1,.2)) +
+#     ggtitle("ROC Curve for selected methods")
+# 
+#   ## Plot decision tree results
+#   plotcp(dt_fit)
+#   
+#   ## Plot conditional inference tree results
+#   plot(ct_fit,main="Conditional Inference Tree")
+#   
+#   ## Plot random forest results
+#   varImpPlot(rf_fit)
+#   
+#   ## Plot xgboost variable importance (top 20)
+#   gb_imp <- gb_imp[order(-gb_imp$Gain),]
+#   
+# #   print(xgb.plot.importance(gb_imp[1:20,]))
+#   dev.off()
+#   
   ## Save xgboost ensemble tree
   ## Note: Output is stored in html format, so it can only be run locally, and exported via RStudio viewer
-  library(stringr)
-  library(DiagrammeR)
-
-  print(home_dir)
-  print(code_dir)
-
-  source(paste0(code_dir,"/xgb_funcs.R")) # Import edited xgboost.multi.tree graphing function
-
-  xg_tree <- xgb.plot.multi.trees(model = gb_fit, features.keep = 3) ## Need to add feature names
-  save(xg_tree,file=paste0(fig_dir,"/gb_",postfix,".RData"))
+#   library(stringr)
+#   library(DiagrammeR)
+#   source(paste0(code_dir,"/xgb_funcs.R")) # Import edited xgboost.multi.tree graphing function
+# 
+#   xg_tree <- xgb.plot.multi.trees(model = gb_fit, features.keep = 3) ## Need to add feature names
+#   save(xg_tree,file=paste0(fig_dir,"/gb_",postfix,".RData"))
   
   ## Calculate AUC
   calc_auc <- function(pred_method) {
@@ -451,6 +439,9 @@ if(Sys.info()[1] =="Linux") {
       imp <- get(paste0(pred_type,"_imp"))[,list(Feature,Gain)]
       setnames(imp,c("Feature","Gain"),c("var_name","measure"))
       imp[,imp_type:="accuracy"]
+    } else if(grepl("cg",pred_type)) {
+      imp <- get(paste0(pred_type,"_imp"))
+      imp[,imp_type:="accuracy"]
     }
     imp[,pred_method:=pred_type]
     setcolorder(imp,c("var_name","imp_type","measure","pred_method"))
@@ -460,20 +451,21 @@ if(Sys.info()[1] =="Linux") {
   importances <- rbindlist(lapply(imp_methods,pull_imp),use.names=T)
   importances <- add_loopvars(importances)
   
-  write.csv(include_list,paste0(data_dir,"/03_perf/include_vars_",postfix,".csv"),row.names=F)
-  write.csv(importances,paste0(data_dir,"/03_perf/imp_",postfix,".csv"),row.names=F)
+  write.csv(include_list,paste0(data_dir,"/03_perf/var_imp/include_vars_",postfix,".csv"),row.names=F)
+  write.csv(importances,paste0(data_dir,"/03_perf/var_imp/imp_",postfix,".csv"),row.names=F)
+  write.csv(lr_coefs,paste0(data_dir,"/03_perf/var_imp/lr_",postfix,".csv"),row.names=F)
 
 ## Export csv for AUC, accuracy, and hosmer-lemeshow, along with fold# and rep#
   auc_results <- add_loopvars(auc_results)
-  write.csv(auc_results,paste0(data_dir,"/03_perf/auc_",postfix,".csv"),row.names=F)
+  write.csv(auc_results,paste0(data_dir,"/03_perf/auc/auc_",postfix,".csv"),row.names=F)
 
   acc_results <- add_loopvars(acc_results)
-  write.csv(acc_results,paste0(data_dir,"/03_perf/acc_",postfix,".csv"),row.names=F)
+  write.csv(acc_results,paste0(data_dir,"/03_perf/acc/acc_",postfix,".csv"),row.names=F)
 
   hl_compiled <- add_loopvars(hl_compiled)
-  write.csv(hl_compiled,paste0(data_dir,"/03_perf/hl_",postfix,".csv"),row.names=F)
+  write.csv(hl_compiled,paste0(data_dir,"/03_perf/hl/hl_",postfix,".csv"),row.names=F)
     
   hl_bins <- add_loopvars(hl_bins)
-  write.csv(hl_bins,paste0(data_dir,"/03_perf/hl_bins_",postfix,".csv"),row.names=F)
+  write.csv(hl_bins,paste0(data_dir,"/03_perf/hl/hl_bins_",postfix,".csv"),row.names=F)
 
 
