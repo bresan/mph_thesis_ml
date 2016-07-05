@@ -3,7 +3,7 @@
 
 ## Setup filepaths
 code_dir <- "/homes/gngu/Thesis/mph_thesis_ml"
-auc_dir <- "/homes/gngu/Thesis/data/03_perf"
+perf_dir <- "/homes/gngu/Thesis/data/03_perf"
 out_dir <- "/homes/gngu/Thesis/results"
 
 ## Identify max number of repetitions and folds
@@ -60,11 +60,11 @@ qsub <- function(jobname, code, hold=NULL, pass=NULL, slots=1, submit=F, log=T, 
 
 ########################################################
 ## Delete existing output from analyses
-system(paste0("perl -e 'unlink <",auc_dir,"/*.csv>' "))
-system(paste0("perl -e 'unlink <",auc_dir,"/auc/*.csv>' "))
-system(paste0("perl -e 'unlink <",auc_dir,"/acc/*.csv>' "))
-system(paste0("perl -e 'unlink <",auc_dir,"/var_imp/*.csv>' "))
-system(paste0("perl -e 'unlink <",auc_dir,"/hl/*.csv>' "))
+# system(paste0("perl -e 'unlink <",perf_dir,"/*.csv>' "))
+system(paste0("perl -e 'unlink <",perf_dir,"/auc/*.csv>' "))
+system(paste0("perl -e 'unlink <",perf_dir,"/acc/*.csv>' "))
+system(paste0("perl -e 'unlink <",perf_dir,"/var_imp/*.csv>' "))
+system(paste0("perl -e 'unlink <",perf_dir,"/hl/*.csv>' "))
 
 # Alternative if no perl:
 # system(paste0("rm ",data_dir,"/*.csv"))
@@ -82,7 +82,7 @@ for(rep in 1:max_reps) {
       for(admit_type in admit_types) {
         qsub(paste0("cv_",rep,"_",fold,"_",weight,"_",admit_type),
              code=paste0(code_dir,"/03_run_analysis.R"),
-             pass=list(rep,fold,max_folds,weight,admit_type),slots=7,submit=T,proj="")
+             pass=list(rep,fold,max_folds,weight,admit_type),slots=8,submit=T,proj="")
       }
     }
   }
@@ -127,7 +127,7 @@ for(rep in 1:max_reps) {
   for(wt in death_wts) {
     for(admit in admit_types) {
       print(paste0("Checking folds for rep ",rep," and weight ",wt," and admit_type ",admit))
-      check_results(c(1:max_folds),auc_dir,
+      check_results(c(1:max_folds),paste0(perf_dir,"/hl"),
                     prefix=paste0("hl_bins_",rep,"_"),
                     postfix=paste0("_",wt,"_",admit,".csv"),
                     sleep=120)

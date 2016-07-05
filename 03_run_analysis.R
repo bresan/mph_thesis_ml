@@ -40,7 +40,7 @@ data_dir <- paste0(home_dir,"/data")
 fig_dir <- paste0(data_dir,"/03_figures")
 code_dir <- paste0(home_dir,"/mph_thesis_ml")
 
-methods <- c("lr","dt","ct","rf","gb","cg") # The two-letter abbreviations for all of the statistical methods
+methods <- c("lr","dt","ct","rf","gb") # The two-letter abbreviations for all of the statistical methods
 
 # test_formula <- as.formula("death~.") # Refactor formula to see if computation goes quicker
 
@@ -113,6 +113,9 @@ train_data <- rbindlist(list(train_data,boot_data),use.names=T)
   lr_fit <- lr_results[1][[1]]
   lr_preds <- lr_results[2][[1]]
   lr_coefs <- lr_results[3][[1]]
+  
+  lr_coefs[,d_wt:=death_wt]
+  lr_coefs[,admit:=admit_type]
 
 #   test_vars <- c(cv_vars,dx_vars[grepl("admit",dx_vars)])
 #   system.time(step <- step(lr_fit,trace=1,direction="backward"))
@@ -232,7 +235,7 @@ if(Sys.info()[1] =="Linux") {
 
   run_car_boost <- function(tr_data,te_data) {
     library(xgboost); library(Matrix); library(caret);library(pROC);library(doMC)
-    registerDoMC(cores = 2)
+    registerDoMC(cores = 1)
     
     xgb_features <- names(tr_data)[names(tr_data) != "death"]
     
@@ -259,10 +262,10 @@ if(Sys.info()[1] =="Linux") {
   gb_preds <- gb_results[2][[1]]
   gb_imp <- gb_results[3][[1]]
 
-  system.time(cg_results <- run_car_boost(tr_data=train_data,te_data=test_data))
-  cg_fit <- cg_results[1][[1]]
-  cg_preds <- cg_results[2][[1]]
-  cg_imp <- cg_results[3][[1]]
+#   system.time(cg_results <- run_car_boost(tr_data=train_data,te_data=test_data))
+#   cg_fit <- cg_results[1][[1]]
+#   cg_preds <- cg_results[2][[1]]
+#   cg_imp <- cg_results[3][[1]]
  
 
 ####################################################
