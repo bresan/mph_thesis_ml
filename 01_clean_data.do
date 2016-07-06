@@ -116,11 +116,27 @@ Purpose: Clean raw PRISM data to prepare for imputation and finally analysis
 	by admit_type: gen diag_order = _n 
 	replace diag_var = "dx_" + diag_var
 	levelsof diag_var if diag_order > 20, local(drop_vars) c // If it's not one of the top-20 diagnoses, drop it
+	levelsof diag_var if diag_order <= 10 & admit_type =="admit", local(admit_10) c
+	levelsof diag_var if diag_order <= 10 & admit_type =="final", local(final_10) c
 	gen diag_rate = dx_admissions/total_admissions
 	keep diag_var dx_admissions total_admissions diag_rate diag_order
 	order diag_var dx_admissions total_admissions diag_rate diag_order
 	export delimited using "$data_dir/01_diagnosis_counts.csv", delimit(",") replace
 	restore 
+	
+	// Make an indicator variable if one of the top 10 variables is "missed" in the initial diagnosis stage, or if there is a mis-diagnosis in the original
+	local admit_10 = subinstr("`admit_10'","dx_admit_","",.)
+	local final_10 = subinstr("`final_10'","dx_final_","",.)
+	
+	foreach var in `admit_10' {
+		gen dx_misdiag_`var' = "No"
+		replace dx_misdiag_`var' = "Yes" if dx_admit_`var' == 1 & dx_final_`var' == 0
+	}
+	
+	foreach var in `final_10' {
+		gen dx_admiss_`var' = "No"
+		replace dx_admiss_`var' = "Yes" if dx_admit_`var' == 0 & dx_final_`var' == 1
+	}
 	
 	drop `drop_vars'
 	
@@ -185,6 +201,22 @@ qui {
 }
 drop p_lag_* Treathosp* drugprescribed* TreatmentAdm* 
 
+// For a subset of diagnoses (malaria, malnutrition, etc.), if they received an initial diagnosis, were they provided with "expected" medicine?
+preserve
+import delimited using "$data_dir/rec_dx_treatments.csv", clear
+levelsof diag_code, local(all_diags) c
+
+foreach diag in `all_diags' {
+	levelsof parent_drug, local(tr_`diag') c
+}
+restore
+
+foreach diag in `all_diags' {
+	gen tr_match_`diag' = "No"
+	foreach treat in `tr_`diag'' {
+		replace tr_match_`diag' = "Yes" if dx_admit_`diag' == 1 & (tr_hosp_`treat' == 1 | tr_admit_`treat' == 1)
+	}
+}
 
 ********************************************************
 ** Standardize variable formatting/labels
@@ -421,7 +453,7 @@ export delimited using "01_cleaned_data.csv", delimit(",") replace
 ********************************************************
 ** Generate cross-tabs of treatment and diagnosis for committee to examine
 // Generate means
-	drop dx_malaria_final tr_anti_malarial
+	drop dx_malaria_final tr_anti_malarial dx_misdiag* dx_admiss* tr_match*
 	collapse (mean) tr_* dx_*
 	rename * mean_*
 	gen id = 1

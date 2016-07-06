@@ -87,10 +87,12 @@ train_data <- master_data[-holdouts]
 test_data <- master_data[holdouts]
 
 ## First, resample with replacement to up-weight deaths by the factor specified
-death_data <- train_data[death=="Yes",]
-boot_indic <- sample(1:nrow(death_data), (nrow(death_data) * (death_wt-1)), replace=T)
-boot_data <- death_data[boot_indic,]
-train_data <- rbindlist(list(train_data,boot_data),use.names=T)
+if(death_wt != 1) {
+  death_data <- train_data[death=="Yes",]
+  boot_indic <- sample(1:nrow(death_data), (nrow(death_data) * (death_wt-1)), replace=T)
+  boot_data <- death_data[boot_indic,]
+  train_data <- rbindlist(list(train_data,boot_data),use.names=T)
+}
 
 # save(train_data,file=paste0(data_dir,"/test_split_",postfix,".RData"))
 

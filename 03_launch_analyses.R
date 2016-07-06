@@ -9,7 +9,7 @@ out_dir <- "/homes/gngu/Thesis/results"
 ## Identify max number of repetitions and folds
 max_reps <- 10
 max_folds <- 10 ## This must be over 1 otherwise everything will be in the test dataset
-death_wts <- c(5,10) # How much to weight the outcome of death 
+death_wts <- c(1,5,10,20,30) # How much to weight the outcome of death 
 admit_types <- c("all","admit_only")
 rep_fold_combos <- expand.grid(c(1:max_reps),c(1:max_folds))
 
@@ -60,7 +60,7 @@ qsub <- function(jobname, code, hold=NULL, pass=NULL, slots=1, submit=F, log=T, 
 
 ########################################################
 ## Delete existing output from analyses
-# system(paste0("perl -e 'unlink <",perf_dir,"/*.csv>' "))
+system(paste0("perl -e 'unlink <",perf_dir,"/*.csv>' "))
 system(paste0("perl -e 'unlink <",perf_dir,"/auc/*.csv>' "))
 system(paste0("perl -e 'unlink <",perf_dir,"/acc/*.csv>' "))
 system(paste0("perl -e 'unlink <",perf_dir,"/var_imp/*.csv>' "))
@@ -80,9 +80,15 @@ for(rep in 1:max_reps) {
   for(fold in 1:max_folds) {
     for(weight in death_wts) {
       for(admit_type in admit_types) {
-        qsub(paste0("cv_",rep,"_",fold,"_",weight,"_",admit_type),
+        if((admit_type == "admit_only" & weight != 30)| weight <= 10) {
+          qsub(paste0("cv_",rep,"_",fold,"_",weight,"_",admit_type),
              code=paste0(code_dir,"/03_run_analysis.R"),
              pass=list(rep,fold,max_folds,weight,admit_type),slots=8,submit=T,proj="")
+        } else if((admit_type == "all" & weight > 10) | (admit_type == "admit_only" & weight == 30)) {
+          qsub(paste0("cv_",rep,"_",fold,"_",weight,"_",admit_type),
+               code=paste0(code_dir,"/03_run_analysis.R"),
+               pass=list(rep,fold,max_folds,weight,admit_type),slots=12,submit=T,proj="")
+        }
       }
     }
   }

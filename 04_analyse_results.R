@@ -20,7 +20,7 @@ fig_dir <- paste0(home_dir,"/graphs")
 ## Identify max reps and folds to bring in
 max_reps <- 10
 max_folds <- 10 ## This must be over 1 otherwise everything will be in the test dataset
-death_wts <- c(5,10) # How much to weight the outcome of death
+death_wts <- c(1,5,10,20,30) # How much to weight the outcome of death
 admit_types <- c("all","admit_only")
 f_vars <- expand.grid(c(1:max_reps),c(1:max_folds),death_wts,admit_types)
 
@@ -29,6 +29,8 @@ postfixes <- paste0("",f_vars$Var1,"_",f_vars$Var2,"_",f_vars$Var3,"_",f_vars$Va
 ## Bring in method labels (to go from two-letter short labels to table/graph labels)
 method_labels <- data.table(fread(paste0(data_dir,"/method_map.csv")))
 
+
+####################################################################################################
 ## Import and analyze all datasets
 ## ROC Curves
 roc_results <- data.table(rbindlist(lapply(postfixes,
@@ -81,6 +83,8 @@ include_vars <- data.table(rbindlist(lapply(postfixes,
 include_summary <- include_vars[,list(mean=sum(include)/(max_reps*max_folds)),by=list(var_name,pred_method,d_wt,admit)]
 include_summary <- merge(include_summary,best_models,by=c("pred_method","d_wt","admit"))
 
+
+####################################################################################################
 ## Create summary measures of variable importance
 imp_summary <- imp_summary[order(pred_method,imp_type,admit,-measure)]
 imp_summary <- imp_summary[,rank:=rank(-measure,ties.method="min"),by=list(pred_method,imp_type,admit)]
@@ -96,7 +100,6 @@ format_vartypes <- function(data) {
 }
 
 imp_top_15 <- format_vartypes(imp_top_15)
-imp_top_15[,combined_varname := sprintf("%02d %s",rank,var_name)]
 
 ## Graph of variables included in the ctree and logistic regression (significance)
 incl_test <- copy(include_summary)
@@ -104,8 +107,30 @@ incl_test <- incl_test[order(pred_method,admit,d_wt,-mean)]
 incl_test <- incl_test[,rank:=rank(-mean,ties.method="min"),by=list(pred_method,admit)]
 incl_test <- incl_test[,min_rank:=min(rank,ties.method="min"),by=list(pred_method,admit)]
 incl_top_15 <- incl_test[rank <=15 | rank == min_rank]
-incl_top_15[,combined_varname := sprintf("%02d %s",rank,var_name)]
 incl_top_15 <- format_vartypes(incl_top_15)
+
+## Format variable names of predictors
+dx_map <- fread(paste0(data_dir,"/diagnosis_map.csv"))
+dx_grid <- data.table(expand.grid(diag_code=unique(dx_map$diag_code),admit=c("admit","final")))
+dx_grid <- merge(dx_grid,dx_map,by="diag_code")
+dx_grid[,var_name:=paste0("dx_",admit,"_",diag_code)]
+dx_grid[,short_name:=paste0("dx_",admit,"_",short_name)]
+dx_grid <- dx_grid[,list(var_name,short_name)]
+
+format_varnames <- function(data) { 
+  for(type in unique(dx_grid[,var_name])) {
+    proper_name <- unique(dx_grid[var_name==type,short_name])
+    data[var_name==type,var_name:=proper_name]
+  }
+}
+
+for(d in c("imp_summary","include_summary","imp_top_15","incl_top_15")) {
+  format_varnames(get(d)) 
+}
+
+incl_top_15[,combined_varname := sprintf("%02d %s",rank,var_name)]
+imp_top_15[,combined_varname := sprintf("%02d %s",rank,var_name)]
+
 
 ## For Heatmap of variable importance/inclusion, do some re-coding to make it sensible
 ## Logistic regression makes dummies, so we have to categorize them appropriately
@@ -143,6 +168,8 @@ heat_template <- data.table(expand.grid(var_name=unique(heat_data$var_name),
                                         admit=unique(heat_data$admit)))
 heat_template <- merge(heat_template,heat_data,by=c("var_name","model_expanded","admit"),all.x=T)
 
+
+####################################################################################################
 ## Format admit lables to be presentation-friendly
 heat_template[admit=="admit_only",admit:="Admit Only"]
 heat_template[admit=="all",admit:="All Variables"]
@@ -172,25 +199,8 @@ for(d in c("best_auc","auc_summary","acc_summary","auc_results","roc_results",
   format_labels(get(d))
 }
 
-## Format variable names of predictors
-dx_map <- fread(paste0(data_dir,"/diagnosis_map.csv"))
-dx_grid <- data.table(expand.grid(diag_code=unique(dx_map$diag_code),admit=c("admit","final")))
-dx_grid <- merge(dx_grid,dx_map,by="diag_code")
-dx_grid[,var_name:=paste0("dx_",admit,"_",diag_code)]
-dx_grid[,short_name:=paste0("dx_",admit,"_",short_name)]
-dx_grid <- dx_grid[,list(var_name,short_name)]
 
-format_varnames <- function(data) { 
-  for(type in unique(dx_grid[,var_name])) {
-    proper_name <- unique(dx_grid[var_name==type,short_name])
-    data[var_name==type,var_name:=proper_name]
-  }
-}
-
-for(d in c("imp_summary","include_summary","imp_top_15","incl_top_15","heat_template")) {
-  format_varnames(get(d)) 
-}
-
+####################################################################################################
 ## Output results
 save(best_auc,auc_summary,acc_summary,hl_summary,
      imp_summary,include_summary,
@@ -206,20 +216,20 @@ roc_results <- merge(roc_results,auc_meds,by=c("Death_weight","admit","Method","
 roc_results[is.na(median),median:=0]
 roc_results <- merge(roc_results,best_models,by=c("Method","admit","Death_weight"))
 
-png(file=paste0(fig_dir,"/roc_admit.png"),width=700,height=500)
+png(file=paste0(fig_dir,"/roc_admit.png"),width=700,height=350)
 plot <- ggplot(NULL,aes(x=fpr,y=tpr, group=interaction(rep,fold))) +
   geom_line(data=roc_results[median == 0,],alpha=.1) +
   geom_line(data=roc_results[median == 1,], color="red") +
   facet_wrap(~ admit+Method, ncol=5) +
-  ggtitle(paste0("ROC by dataset (admission-only vs. all) and model, one line per rep/fold combination"))
+  ggtitle(paste0("ROC by dataset (admission-only vs. all) and method, one line per rep/fold combination"))
 print(plot)
 dev.off()
 
 ## Graph just the median ROC curves
-png(file=paste0(fig_dir,"/roc_median.png"),width=700,height=500)
+png(file=paste0(fig_dir,"/roc_median.png"),width=700,height=350)
 plot <- ggplot(data=roc_results[median == 1,],aes(x=fpr,y=tpr,color=Method)) +
   geom_line() +
   facet_wrap(~admit) +
-  ggtitle("Median (by AUC) ROC curves of all tested methods \n By dataset (admission-data only or all data) and death weight (5 or 10)") 
+  ggtitle("Median (by AUC) ROC curves of all tested methods \n By dataset (admission-data only or all data)") 
 print(plot)
 dev.off()
