@@ -9,11 +9,11 @@
 rep_num <- 1      # The repetition number used for the cross-validation (10 repetitions of 10-fold CV), used as a unique seed for each rep
 fold_num <- 10    # The fold number that we should extract from the 10-fold CV to use as a holdout
 tot_folds <- 10   # The total number of folds that we are running (to make sure we specify the correct value for k in createFolds)
-death_wt <- 10    # The weights to use on death for the different methods
-admit_type <- "admit_only" # Whether to run analyses on "all" variables or "admit_only" -- those only available at admission 
+death_wt <- 30    # The weights to use on death for the different methods
+admit_type <- "all" # Whether to run analyses on "all" variables or "admit_only" -- those only available at admission 
 
-home_dir <- "H:/Thesis"
- 
+home_dir <- "/homes/gngu/Thesis"
+
 ifelse(admit_type=="all",
        load(paste0(home_dir,"/data/02_prepped_data.RData")),
        load(paste0(home_dir,"/data/02_prepped_data_admitonly.RData")))
@@ -74,47 +74,29 @@ if(death_wt != 1) {
 }
 
 
-##########################
-## Define functions
-run_caret <- function(data,formula,method) {
-  library(caret);library(pROC)
-  if(method == "ctree") sel_method <- "ctree"
-  if(method == "xgboost") sel_method <- "xgbTree"
-  if(method == "rpart") sel_method <- "rpart"
-  if(method == "rand_forest") sel_method <- "rf"
-  
-  # Here we use 10-fold cross-validation, repeating twice, and using random search for tuning hyper-parameters.
-  fitControl <- trainControl(method = "cv", number = 10, repeats = 2, search = "random",
-                             summaryFunction = twoClassSummary,classProbs=T)
-  
-  ct_fit <- train(formula, data=data,method=sel_method, trControl = fitControl,metric = "ROC")
-  ct_imp <- varImp(ct_fit)
-  ct_pred <- predict(ct_fit,type="prob",newdata=test_data)
-  return(list(ct_fit,ct_pred,ct_imp))
-}
+## Run ensemble
+library("caret")
+library("pROC")
+set.seed(107)
 
-############################
-## Run analyses
-system.time(test_ctree <- run_caret(data=train_data,formula=test_formula,method="ctree"))
-system.time(test_rpart <- run_caret(data=train_data,formula=test_formula,method="rpart"))
-system.time(test_boost <- run_caret(data=train_data,formula=test_formula,method="xgboost"))
-system.time(test_rf <- run_caret(data=train_data,formula=test_formula,method="rand_forest"))
+my_control <- trainControl(
+  method = "cv", number = 10, repeats = 2,
+  classProbs=TRUE,
+  summaryFunction=twoClassSummary
+)
 
-boost_preds <- test_boost[2][[1]]$Yes
-rpart_preds <- test_rpart[2][[1]]$Yes
-ctree_preds <- test_ctree[2][[1]]$Yes
+library("randomForest");library("xgboost")
+library("caretEnsemble")
+data_new <- copy(train_data)
+outcome <- data_new[,death]
+data_new[,death:=NULL]
 
+model_list <- caretList(
+  x=data_new,y=outcome,
+  trControl=my_control,
+  methodList=c("glm","rf","xgbTree")
+)
 
-calc_auc <- function(pred_method) {
-  library(ROCR)
-  pred <- prediction(get(paste0(pred_method,"_preds")),test_data[,death_test])
-  auc_perf <- performance(pred,measure="auc")
-  auc <- unlist(auc_perf@y.values)
-  auc_dt <- data.table(pred_method,auc)
-  return(auc_dt)
-}
-
-new <- calc_auc("rpart")
-
-save.image("/homes/gngu/test_results.RData")
+p <- as.data.frame(predict(model_list, newdata=test_data))
+print(p)
 

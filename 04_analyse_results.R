@@ -43,7 +43,19 @@ auc_summary <- auc_results[,list(mean=mean(auc),lower=quantile(auc,.025),upper=q
 auc_summary[,auc_max:=max(mean),by=list(pred_method,admit)]
 best_auc <- auc_summary[mean==auc_max]
 best_auc <- unique(best_auc,by=c("pred_method","admit"))
-best_models <- best_auc[,list(pred_method,d_wt,admit)]
+best_auc[,format_auc := paste0(round(mean,2)," (",paste0(round(lower,2))," - ",paste0(round(upper,2)),")")]
+
+best_models <- best_auc[,list(pred_method,d_wt,admit)] # Save best models map to merge with other datasets
+
+admit_auc <- best_auc[admit=="admit_only",list(pred_method,d_wt,format_auc)]
+setnames(admit_auc,c("d_wt","format_auc"),c("Death Weight Admit Only","AUC Admit Only"))
+all_auc <- best_auc[admit=="All Variables",list(pred_method,d_wt,format_auc,mean)]
+all_auc[,sort_order:=rank(-mean,ties.method="min")]
+all_auc[,mean:=NULL]
+setnames(all_auc,c("d_wt","format_auc"),c("Death Weight All Vars","AUC All Vars"))
+best_auc <- merge(admit_auc,all_auc,by=c("pred_method"))
+best_auc <- best_auc[order(sort_order),]
+best_auc[,sort_order:=NULL]
 
 # Accuracy
 acc_results <- data.table(rbindlist(lapply(postfixes,
@@ -53,12 +65,27 @@ acc_summary <- acc_results[,list(mean=mean(accuracy),lower=quantile(accuracy,.02
                            by=list(pred_method,pred_prob,d_wt,admit)]
 acc_summary <- merge(acc_summary,best_models,by=c("pred_method","d_wt","admit"))
 
+acc_summary[,format_acc := paste0(round(mean,2)," (",paste0(round(lower,2))," - ",paste0(round(upper,2)),")")]
+admit_acc <- acc_summary[admit=="admit_only",list(pred_method,pred_prob,format_acc)]
+setnames(admit_acc,c("format_acc"),c("Accuracy Admit Only"))
+all_acc <- acc_summary[admit=="all",list(pred_method,pred_prob,format_acc)]
+setnames(all_acc,c("format_acc"),c("Accuracy All Variables"))
+acc_summary <- merge(admit_acc,all_acc,by=c("pred_method","pred_prob"))
+acc_summary <- acc_summary[order(pred_method,pred_prob),]
+
 # Hosmer-Lemeshow
 hl_results <- data.table(rbindlist(lapply(postfixes,
                                            function(x) fread(paste0(data_dir,"/03_perf/hl/hl_",x)))))
 hl_results <- hl_results[!is.na(stat)]
 hl_summary <- hl_results[,list(mean_stat=mean(stat),mean_p=mean(p)),by=list(pred_method,d_wt,admit)]
 hl_summary <- merge(hl_summary,best_models,by=c("pred_method","d_wt","admit"))
+hl_summary[,format_hl := paste0(round(mean,2)," (",paste0(mean_p),")")]
+admit_hl <- admit_hl[admit=="admit_only",list(pred_method,format_hl)]
+setnames(admit_hl,"format_hl","Admit Only")
+all_hl <- all_hl[admit=="all",list(pred_method,format_hl)]
+setnames(all_hl,"format_hl","All Variables")
+hl_summary <- merge(admit_hl,all_hl,by="pred_method")
+hl_summary <- hl_summary[order(pred_method),]
 
 hl_bin_results <- data.table(rbindlist(lapply(postfixes,
                                               function(x) fread(paste0(data_dir,"/03_perf/hl/hl_bins_",x)))))
@@ -175,22 +202,37 @@ heat_template[admit=="admit_only",admit:="Admit Only"]
 heat_template[admit=="all",admit:="All Variables"]
 setnames(heat_template,"admit","Admit")
 
+## Add a sort order for heat template
+sort_order <- unique(heat_template[,list(var_name,Admit,rank)]) 
+sort_order <- sort_order[!is.na(rank),list(tot_num=length(rank),
+                                           best_rank=min(rank)),
+                         by=list(var_name,Admit)]
+sort_order <- sort_order[order(tot_num,-best_rank)]
+sort_order <- sort_order[,sort:=rank(tot_num,ties.method="first"),by=list(Admit)]
+
+heat_template <- merge(heat_template,sort_order,by=c("var_name","Admit"))
+
+
 ## Add method labels onto all output datasets
 format_labels <- function(data) {
   ## Re-assign variables instead of merging so that the changes will "stick" easily
-  for(type in unique(method_labels[,pred_method])) {
-    proper_name <- unique(method_labels[pred_method==type,Method])
-    data[pred_method==type,pred_method:=proper_name]
+  if("pred_method" %in% colnames(data)) {
+    for(type in unique(method_labels[,pred_method])) {
+      proper_name <- unique(method_labels[pred_method==type,Method])
+      data[pred_method==type,pred_method:=proper_name]
+    }
+    setnames(data,"pred_method","Method")
   }
-  setnames(data,"pred_method","Method")
   
   ## Format admit lables to be presentation-friendly
-  data[admit=="admit_only",admit:="Admit Only"]
-  data[admit=="all",admit:="All Variables"]
+  if("admit" %in% colnames(data)) {
+    data[admit=="admit_only",admit:="Admit Only"]
+    data[admit=="all",admit:="All Variables"]
+  }
 #   setnames(data,"admit","Admit")
   
   ## Rename d_wt
-  setnames(data,"d_wt","Death_weight")
+  if("d_wt" %in% colnames(data)) setnames(data,"d_wt","Death_weight")
 }
 
 for(d in c("best_auc","auc_summary","acc_summary","auc_results","roc_results",
@@ -202,10 +244,6 @@ for(d in c("best_auc","auc_summary","acc_summary","auc_results","roc_results",
 
 ####################################################################################################
 ## Output results
-save(best_auc,auc_summary,acc_summary,hl_summary,
-     imp_summary,include_summary,
-     imp_top_15,incl_top_15,heat_template,file=paste0(out_dir,"/results.RData"))
-
 
 ## Save ROC graphs with all 100 draws and median draw highlighted in red
 auc_results[,median:=quantile(auc,.5,type=3),by=list(Method,Death_weight,admit)] # This chooses a median by defaulting to nearest even order statistic
@@ -216,20 +254,25 @@ roc_results <- merge(roc_results,auc_meds,by=c("Death_weight","admit","Method","
 roc_results[is.na(median),median:=0]
 roc_results <- merge(roc_results,best_models,by=c("Method","admit","Death_weight"))
 
-png(file=paste0(fig_dir,"/roc_admit.png"),width=700,height=350)
-plot <- ggplot(NULL,aes(x=fpr,y=tpr, group=interaction(rep,fold))) +
-  geom_line(data=roc_results[median == 0,],alpha=.1) +
-  geom_line(data=roc_results[median == 1,], color="red") +
-  facet_wrap(~ admit+Method, ncol=5) +
-  ggtitle(paste0("ROC by dataset (admission-only vs. all) and method, one line per rep/fold combination"))
-print(plot)
-dev.off()
+save(best_auc,auc_summary,acc_summary,hl_summary,
+     imp_summary,include_summary,
+     imp_top_15,incl_top_15,heat_template,roc_results,file=paste0(out_dir,"/results.RData"))
 
-## Graph just the median ROC curves
-png(file=paste0(fig_dir,"/roc_median.png"),width=700,height=350)
-plot <- ggplot(data=roc_results[median == 1,],aes(x=fpr,y=tpr,color=Method)) +
-  geom_line() +
-  facet_wrap(~admit) +
-  ggtitle("Median (by AUC) ROC curves of all tested methods \n By dataset (admission-data only or all data)") 
-print(plot)
-dev.off()
+
+# png(file=paste0(fig_dir,"/roc_admit.png"),width=700,height=350)
+# plot <- ggplot(NULL,aes(x=fpr,y=tpr, group=interaction(rep,fold))) +
+#   geom_line(data=roc_results[median == 0,],alpha=.1) +
+#   geom_line(data=roc_results[median == 1,], color="red") +
+#   facet_wrap(~ admit+Method, ncol=5) +
+#   ggtitle(paste0("ROC by dataset (admission-only vs. all) and method, one line per rep/fold combination"))
+# print(plot)
+# dev.off()
+# 
+# ## Graph just the median ROC curves
+# png(file=paste0(fig_dir,"/roc_median.png"),width=700,height=350)
+# plot <- ggplot(data=roc_results[median == 1,],aes(x=fpr,y=tpr,color=Method)) +
+#   geom_line() +
+#   facet_wrap(~admit) +
+#   ggtitle("Median (by AUC) ROC curves of all tested methods \n By dataset (admission-data only or all data)") 
+# print(plot)
+# dev.off()

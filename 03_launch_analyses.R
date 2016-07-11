@@ -80,14 +80,18 @@ for(rep in 1:max_reps) {
   for(fold in 1:max_folds) {
     for(weight in death_wts) {
       for(admit_type in admit_types) {
-        if((admit_type == "admit_only" & weight != 30)| weight <= 10) {
+        if(admit_type == "admit_only" & weight != 30) {
           qsub(paste0("cv_",rep,"_",fold,"_",weight,"_",admit_type),
              code=paste0(code_dir,"/03_run_analysis.R"),
-             pass=list(rep,fold,max_folds,weight,admit_type),slots=8,submit=T,proj="")
-        } else if((admit_type == "all" & weight > 10) | (admit_type == "admit_only" & weight == 30)) {
+             pass=list(rep,fold,max_folds,weight,admit_type),slots=9,submit=T,proj="")
+        } else if(admit_type == "all" & weight <= 10) {
           qsub(paste0("cv_",rep,"_",fold,"_",weight,"_",admit_type),
                code=paste0(code_dir,"/03_run_analysis.R"),
-               pass=list(rep,fold,max_folds,weight,admit_type),slots=12,submit=T,proj="")
+               pass=list(rep,fold,max_folds,weight,admit_type),slots=10,submit=T,proj="")
+        } else {
+          qsub(paste0("cv_",rep,"_",fold,"_",weight,"_",admit_type),
+               code=paste0(code_dir,"/03_run_analysis.R"),
+               pass=list(rep,fold,max_folds,weight,admit_type),slots=13,submit=T,proj="")
         }
       }
     }
