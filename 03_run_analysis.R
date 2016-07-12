@@ -103,7 +103,7 @@ if(death_wt != 1) {
 ## Logistic Regression
   run_logistic <- function(data,formula) {
     lr_fit <- glm(formula,data=data,family = binomial(link = "logit"))
-    lr_pred <- predict(lr_fit,test_data)
+    lr_pred <- predict(lr_fit,test_data,type="response")
     
     lr_coefs <- data.frame(lr_fit$coefficients)
     setDT(lr_coefs,keep.rownames=T)

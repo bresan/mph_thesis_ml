@@ -48,11 +48,11 @@ best_auc[,format_auc := paste0(round(mean,2)," (",paste0(round(lower,2))," - ",p
 best_models <- best_auc[,list(pred_method,d_wt,admit)] # Save best models map to merge with other datasets
 
 admit_auc <- best_auc[admit=="admit_only",list(pred_method,d_wt,format_auc)]
-setnames(admit_auc,c("d_wt","format_auc"),c("Death Weight Admit Only","AUC Admit Only"))
-all_auc <- best_auc[admit=="All Variables",list(pred_method,d_wt,format_auc,mean)]
+setnames(admit_auc,c("d_wt","format_auc"),c("Death Wt Admit Only","AUC Admit Only"))
+all_auc <- best_auc[admit=="all",list(pred_method,d_wt,format_auc,mean)]
 all_auc[,sort_order:=rank(-mean,ties.method="min")]
 all_auc[,mean:=NULL]
-setnames(all_auc,c("d_wt","format_auc"),c("Death Weight All Vars","AUC All Vars"))
+setnames(all_auc,c("d_wt","format_auc"),c("Death Wt All Vars","AUC All Vars"))
 best_auc <- merge(admit_auc,all_auc,by=c("pred_method"))
 best_auc <- best_auc[order(sort_order),]
 best_auc[,sort_order:=NULL]
@@ -79,11 +79,11 @@ hl_results <- data.table(rbindlist(lapply(postfixes,
 hl_results <- hl_results[!is.na(stat)]
 hl_summary <- hl_results[,list(mean_stat=mean(stat),mean_p=mean(p)),by=list(pred_method,d_wt,admit)]
 hl_summary <- merge(hl_summary,best_models,by=c("pred_method","d_wt","admit"))
-hl_summary[,format_hl := paste0(round(mean,2)," (",paste0(mean_p),")")]
-admit_hl <- admit_hl[admit=="admit_only",list(pred_method,format_hl)]
-setnames(admit_hl,"format_hl","Admit Only")
-all_hl <- all_hl[admit=="all",list(pred_method,format_hl)]
-setnames(all_hl,"format_hl","All Variables")
+hl_summary[,format_hl := paste0(round(mean_stat,2)," (",paste0(round(mean_p,2)),")")]
+admit_hl <- hl_summary[admit=="admit_only",list(pred_method,format_hl)]
+setnames(admit_hl,"format_hl","Admit Only Mean Stat (mean p-val)")
+all_hl <- hl_summary[admit=="all",list(pred_method,format_hl)]
+setnames(all_hl,"format_hl","All Variables Mean Stat (mean p-val)")
 hl_summary <- merge(admit_hl,all_hl,by="pred_method")
 hl_summary <- hl_summary[order(pred_method),]
 
@@ -128,12 +128,26 @@ format_vartypes <- function(data) {
 
 imp_top_15 <- format_vartypes(imp_top_15)
 
-## Graph of variables included in the ctree and logistic regression (significance)
-incl_test <- copy(include_summary)
+## Graph of variables included in the ctree and logistic regression (significance then betas)
+# Collapse lr_test to means of the betas
+lr_test <- lr_betas[,list(mean_beta=mean(beta)),by=list(d_wt,admit,var_name)]
+
+# First find the top-15 LR by significance, then by betas if there are >15 100% sig vars
+lr_test <- merge(lr_test,include_summary[pred_method=="lr"],by=c("d_wt","var_name","admit"))
+lr_test <- lr_test[order(admit,d_wt,-mean,-mean_beta)]
+lr_test[,rank:=rank(-mean,ties.method="min"),by=list(admit)]
+lr_test <- lr_test[rank<=15,]
+lr_test[,abs_beta:=abs(mean_beta)]
+lr_test[,rank:=rank(-abs_beta,ties.method="min"),by=list(admit)]
+lr_test <- lr_test[rank<=15,list(d_wt,pred_method,var_name,admit,rank,mean_beta)]
+setnames(lr_test,"mean_beta","mean")
+
+incl_test <- copy(include_summary[pred_method=="ct",])
 incl_test <- incl_test[order(pred_method,admit,d_wt,-mean)]
-incl_test <- incl_test[,rank:=rank(-mean,ties.method="min"),by=list(pred_method,admit)]
-incl_test <- incl_test[,min_rank:=min(rank,ties.method="min"),by=list(pred_method,admit)]
-incl_top_15 <- incl_test[rank <=15 | rank == min_rank]
+incl_test[,rank:=rank(-mean,ties.method="min"),by=list(pred_method,admit)]
+incl_top_15 <- incl_test[rank <=15]
+
+incl_top_15 <- rbindlist(list(incl_top_15,lr_test),use.names=T)
 incl_top_15 <- format_vartypes(incl_top_15)
 
 ## Format variable names of predictors
