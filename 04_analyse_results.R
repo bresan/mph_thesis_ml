@@ -190,13 +190,15 @@ incl_heat <- incl_heat[grepl("ss_wheezing",var_name),var_name:="ss_wheezing"]
 incl_heat <- incl_heat[grepl("ss_dpbreath",var_name),var_name:="ss_dpbreath"]
 incl_heat <- incl_heat[grepl("ss_cough2weeks",var_name),var_name:="ss_cough2weeks"]
 incl_heat <- incl_heat[grepl("flarnostril",var_name),var_name:="flarnostril"]
+incl_heat[,var_name:=gsub("Yes","",var_name)]
+incl_heat[,var_name:=gsub("No","",var_name)]
 
 ## Format inclusion and importance datasets similarly
 imp_heat <- merge(imp_top_15,method_labels,by="pred_method")
 imp_heat[,pred_method:=NULL]
 imp_heat <- imp_heat[,model_expanded:=paste0(Method,"_",imp_type)]
 
-incl_heat[pred_method=="lr",rank:=7] # All logistic is included in everything
+# incl_heat[pred_method=="lr",rank:=7] # All logistic is included in everything
 incl_heat <- merge(incl_heat,method_labels,by="pred_method")
 incl_heat[,pred_method:=NULL]
 setnames(incl_heat,"Method","model_expanded")
@@ -268,9 +270,29 @@ roc_results <- merge(roc_results,auc_meds,by=c("Death_weight","admit","Method","
 roc_results[is.na(median),median:=0]
 roc_results <- merge(roc_results,best_models,by=c("Method","admit","Death_weight"))
 
+## Calculate FPR given TPR cutoffs
+setkey(roc_results,Method,admit,Death_weight,fold,rep)
+
+## Calculate the rel_change within group -- each observation's value of rel_change is the rel_change between the current observation and the previous
+## Equation is (current_value - previous_value) / previous_value
+calc_tpr_fpr <- function(tpr_threshold=.75) {
+  dt <- roc_results[shift(tpr,1,type="lag") < tpr_threshold & tpr > tpr_threshold]
+  dt <- dt[,list(mean=mean(fpr),lower=quantile(fpr,.025),upper=quantile(fpr,.975)),by=list(Method,admit,Death_weight)]
+  dt[,threshold:=paste0("FPR at ",tpr_threshold)]
+  return(dt)
+}
+
+thresholds <- c(.7,.8,.9)
+summary_tpr <- rbindlist(lapply(thresholds,calc_tpr_fpr))
+summary_tpr[,format_fpr := paste0(round(mean,2)," (",round(lower,2),"-",round(upper,2),")")]
+summary_tpr <- data.table(dcast(summary_tpr[,list(Method,admit,format_fpr,threshold)],Method+admit~threshold,value.var="format_fpr"))
+summary_tpr <- summary_tpr[order(admit,Method),]
+
 save(best_auc,auc_summary,acc_summary,hl_summary,
      imp_summary,include_summary,
-     imp_top_15,incl_top_15,heat_template,roc_results,file=paste0(out_dir,"/results.RData"))
+     imp_top_15,incl_top_15,heat_template,
+     roc_results,summary_tpr,
+     file=paste0(out_dir,"/results.RData"))
 
 
 # png(file=paste0(fig_dir,"/roc_admit.png"),width=700,height=350)

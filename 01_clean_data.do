@@ -207,14 +207,22 @@ import delimited using "$data_dir/rec_dx_treatments.csv", clear
 levelsof diag_code, local(all_diags) c
 
 foreach diag in `all_diags' {
-	levelsof parent_drug, local(tr_`diag') c
+	levelsof parent_drug if type == "primary" | type == "general", local(tr_pr_`diag') c
+	levelsof parent_drug if type == "supportive", local(tr_sec_`diag') c
 }
 restore
 
 foreach diag in `all_diags' {
 	gen tr_match_`diag' = "No"
-	foreach treat in `tr_`diag'' {
+	// Categorize treated cases
+	foreach treat in `tr_pr_`diag'' {
 		replace tr_match_`diag' = "Yes" if dx_admit_`diag' == 1 & (tr_hosp_`treat' == 1 | tr_admit_`treat' == 1)
+	}
+	// Categorize cases that only got supportive care
+	if "`tr_sec_`diag'" != "" {
+		foreach treat in `tr_sec_`diag'' {
+			replace tr_match_`diag' = "Support Only" if dx_admit_`diag' == 1 & tr_match_`diag' == "No" & (tr_hosp_`treat' == 1 | tr_admit_`treat' == 1)
+		}
 	}
 }
 

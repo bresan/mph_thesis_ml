@@ -87,11 +87,11 @@ for(rep in 1:max_reps) {
         } else if(admit_type == "all" & weight <= 10) {
           qsub(paste0("cv_",rep,"_",fold,"_",weight,"_",admit_type),
                code=paste0(code_dir,"/03_run_analysis.R"),
-               pass=list(rep,fold,max_folds,weight,admit_type),slots=10,submit=T,proj="")
+               pass=list(rep,fold,max_folds,weight,admit_type),slots=12,submit=T,proj="")
         } else {
           qsub(paste0("cv_",rep,"_",fold,"_",weight,"_",admit_type),
                code=paste0(code_dir,"/03_run_analysis.R"),
-               pass=list(rep,fold,max_folds,weight,admit_type),slots=13,submit=T,proj="")
+               pass=list(rep,fold,max_folds,weight,admit_type),slots=15,submit=T,proj="")
         }
       }
     }
@@ -130,8 +130,8 @@ check_results <- function(locations,check_dir,prefix="",postfix,sleep=60) {
   }
 }
 
-## Wait 60 minutes, then start checking
-Sys.sleep(60*60)
+## Wait 2 hours, then start checking
+Sys.sleep(120*60)
 
 for(rep in 1:max_reps) {
   for(wt in death_wts) {

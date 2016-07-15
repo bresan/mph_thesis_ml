@@ -130,6 +130,21 @@ if(death_wt != 1) {
 ## new <- step(lr_fit)
 ## However, runtime is indeterminate right now (____ hrs)
 
+## LASSO
+  run_lasso <- function(data) {
+    library(glmnet)
+    data_new <- copy(data)
+    data_test <- model.matrix(test_formula,test_data)
+    outcome <- as.double(data_new[,death])-1 # Turn death into a 0/1 with 1 being death
+    data_new[,death:=NULL]
+    data_new <- model.matrix(~.,data_new)
+    lasso_cv <- cv.glmnet(data_new,outcome,family="binomial",type.measure="auc")
+    lasso_preds <- predict(lasso_cv,data_test,s="lambda.min",type="response")
+    lambda_index <- which(lasso_cv$lambda == lasso_cv$lambda.min)
+    lasso_coefs <- lasso_cv$glmnet.fit$beta[,lambda_index]
+    lasso_coefs[lasso_coefs==0]
+  }
+
 
 ## Decision Tree
   run_dtree <- function(data,formula) {
