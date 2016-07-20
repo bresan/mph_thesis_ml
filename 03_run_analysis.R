@@ -9,10 +9,10 @@ if(Sys.info()[1] =="Windows") {
   home_dir <- "H:/Thesis"
   
   rep_num <- 1      # The repetition number used for the cross-validation (10 repetitions of 10-fold CV), used as a unique seed for each rep
-  fold_num <- 10    # The fold number that we should extract from the 10-fold CV to use as a holdout
+  fold_num <- 6    # The fold number that we should extract from the 10-fold CV to use as a holdout
   tot_folds <- 10   # The total number of folds that we are running (to make sure we specify the correct value for k in createFolds)
-  death_wt <- 10    # The weights to use on death for the different methods
-  admit_type <- "admit_only" # Whether to run analyses on "all" variables or "admit_only" -- those only available at admission 
+  death_wt <- 1    # The weights to use on death for the different methods
+  admit_type <- "all" # Whether to run analyses on "all" variables or "admit_only" -- those only available at admission 
 } else if (Sys.info()[1] == "Darwin") { # Macintosh
   home_dir <- "/Users/Grant/Desktop/Thesis"
   

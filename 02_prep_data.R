@@ -75,13 +75,22 @@ test_data[,sort_obs:=NULL]
 
 ## Convert both datasets' characters to factor variables
 ## We do this here to avoid the test data from having factor levels that don't actually exist in the test dataset 
+
+# First, define a function that encodes the reference groups appropriately
 convert_factors <- function(dt) {
   char_cols <- names(dt[,.SD,.SDcols=sapply(dt,is.character)])
-  print(length(char_cols))
+  nonmiss_factors <- c("cv_gender","cv_site_id","ss_airway","ss_pallor")
+  miss_factors <- char_cols[!char_cols %in% nonmiss_factors]  
+  age_levels <- c("48 to 53 months","0 to 1 months","2 to 4 months","4 to 7 months","7 to 12 months",
+                  "12 to 24 months","24 to 36 months","36 to 48 months","48 to 60 months")
+  
   if(length(char_cols) > 0 & length(char_cols) != length(names(dt))) {
-    fac_dt <- dt[,lapply(.SD,as.factor),.SDcols=char_cols]
+    miss_dt <- dt[,lapply(.SD,factor,levels=c("No","Yes","Missing")),.SDcols=miss_factors]
+    nonmiss_dt <- dt[,lapply(.SD,as.factor),.SDcols=nonmiss_factors]
+    age_dt <- dt[,lapply(.SD,as.factor,levels=c(),.SDcols="cv_age"]
+    
     dt[,c(char_cols):=NULL]
-    dt <- cbind(dt,fac_dt)
+    dt <- cbind(dt,miss_dt,nonmiss_dt,age_dt)
   } else if(length(char_cols)==length(names(dt))) {
     dt <- dt[,lapply(.SD,as.factor),.SDcols=char_cols]
   }

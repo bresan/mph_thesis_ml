@@ -109,7 +109,7 @@ include_vars <- data.table(rbindlist(lapply(postfixes,
 # A value of over 1 for the mean here means that it was included in more than one split on the CTree
 include_summary <- include_vars[,list(mean=sum(include)/(max_reps*max_folds)),by=list(var_name,pred_method,d_wt,admit)]
 include_summary <- merge(include_summary,best_models,by=c("pred_method","d_wt","admit"))
-
+include_summary[,var_name:=gsub("."," ",var_name,fixed=T)]
 
 ####################################################################################################
 ## Create summary measures of variable importance

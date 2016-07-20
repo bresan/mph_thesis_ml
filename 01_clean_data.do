@@ -129,13 +129,13 @@ Purpose: Clean raw PRISM data to prepare for imputation and finally analysis
 	local final_10 = subinstr("`final_10'","dx_final_","",.)
 	
 	foreach var in `admit_10' {
-		gen dx_misdiag_`var' = "No"
-		replace dx_misdiag_`var' = "Yes" if dx_admit_`var' == 1 & dx_final_`var' == 0
+		gen dx_misdiag_`var' = 0
+		replace dx_misdiag_`var' = 1 if dx_admit_`var' == 1 & dx_final_`var' == 0
 	}
 	
 	foreach var in `final_10' {
-		gen dx_admiss_`var' = "No"
-		replace dx_admiss_`var' = "Yes" if dx_admit_`var' == 0 & dx_final_`var' == 1
+		gen dx_admiss_`var' = 0
+		replace dx_admiss_`var' = 1 if dx_admit_`var' == 0 & dx_final_`var' == 1
 	}
 	
 	drop `drop_vars'
@@ -222,6 +222,12 @@ foreach diag in `all_diags' {
 	if "`tr_sec_`diag'" != "" {
 		foreach treat in `tr_sec_`diag'' {
 			replace tr_match_`diag' = "Support Only" if dx_admit_`diag' == 1 & tr_match_`diag' == "No" & (tr_hosp_`treat' == 1 | tr_admit_`treat' == 1)
+			
+			// If there are fewer than 10 observations in the support only column, call all of them general
+			// This is to avoid test/train split issues later on, where the training set may not contain any observations that include a "Support Only" value
+			//	and is asked to predict on the test dataset that does have some of those values
+			qui count if tr_match_`diag' == "Support Only" 
+			if `r(N)' < 10 replace tr_match_`diag' = "Yes" if tr_match_`diag' == "Support Only"
 		}
 	}
 }
@@ -252,6 +258,14 @@ foreach diag in `all_diags' {
 	
 	drop Days admit_duration // Drop the LOS variables for now since they are quite discrepant
 	
+// Recode sex into a character variable
+	gen sex = ""
+	replace sex = "Male" if Gender == 0
+	replace sex = "Female" if Gender == 1
+	replace sex = "Missing" if Gender == 9
+	drop Gender
+	rename sex Gender
+	
 // Fix ages -- variable age is in months, along with significant heaping to major age values
 // Other age variables available -- year, month, day
 	/*
@@ -272,9 +286,10 @@ foreach diag in `all_diags' {
 	
 // Recode ages to a categorical to address age heaping
 	egen age_cat = cut(age), at(0 2 4 7 12 24 36 48 60) // Cut at 0-1 months, 2-3 months, 4-6 months, 7-11, then annual after
-	gen age_end = age_cat + 5
-	replace age_end = 5 if age_cat == 1
+	gen age_end = age_cat + 12
 	replace age_end = 1 if age_cat == 0
+	replace age_end = 4 if age_cat == 2
+	replace age_end = 7 if age_cat == 4
 	tostring age_end, replace
 	tab age_cat
 	tostring age_cat, replace
