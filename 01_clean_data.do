@@ -290,6 +290,7 @@ foreach diag in `all_diags' {
 	replace age_end = 1 if age_cat == 0
 	replace age_end = 4 if age_cat == 2
 	replace age_end = 7 if age_cat == 4
+	replace age_end = 12 if age_cat == 7
 	tostring age_end, replace
 	tab age_cat
 	tostring age_cat, replace
@@ -309,6 +310,7 @@ foreach diag in `all_diags' {
 	replace malaria_test = "Complicated" if compmalaria == 1 
 	replace malaria_test = "Uncomplicated" if malaria_test == "Yes"
 	replace malaria_test = "None" if malaria_test == "No"
+	replace malaria_test = "Missing" if malaria_test == ""
 	drop compmalaria malaria labtestresult
 	rename clinicalmalaria malaria_final // This is the final diagnosis of malaria, rather than the malaria test
 
@@ -344,6 +346,19 @@ foreach diag in `all_diags' {
 	replace Airway = "Clear" if inlist(Airway,"0","1") // Assume that 0 means clear airway, and was just miscoded
 	replace Airway = "Strider" if inlist(Airway,"2")
 	replace Airway = "Missing" if inlist(Airway,"9")
+	
+// Generate a string variable for BS, RDT, and HIV test
+	tostring HIV, replace
+	replace HIV = "Yes" if HIV == "1"
+	replace HIV = "No" if HIV == "2"
+	replace HIV = "Missing" if HIV == "9"
+	
+	foreach var in BS1admit RDTadmit {
+		tostring `var', replace
+		replace `var' = "Yes" if `var' == "1"
+		replace `var' = "No" if `var' == "0"
+		replace `var' = "Missing" if `var' == "9"
+	}
 	
 // Recode random missings
 	replace AltConsciousness = . if AltConsciousness == 11
