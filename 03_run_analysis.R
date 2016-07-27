@@ -143,6 +143,11 @@ if(death_wt != 1) {
     lambda_index <- which(lasso_cv$lambda == lasso_cv$lambda.min)
     lasso_coefs <- lasso_cv$glmnet.fit$beta[,lambda_index]
     lasso_coefs[lasso_coefs==0]
+    
+    lasso_coefs <- data.frame(lasso_coefs)
+    setDT(lasso_coefs,keep.rownames=T)
+    setnames(lasso_coefs,c("rn","lasso_coefs"),c("var_name","beta"))
+    
   }
 
 

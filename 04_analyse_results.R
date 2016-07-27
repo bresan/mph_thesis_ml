@@ -118,11 +118,13 @@ imp_summary <- imp_summary[,rank:=rank(-measure,ties.method="min"),by=list(pred_
 imp_top_15 <- imp_summary[rank <= 15]
 
 format_vartypes <- function(data) {
-  data <- data[substr(var_name,1,2)=="ss",var_type:="ss"]
-  data <- data[substr(var_name,1,2)=="dx",var_type:="dx"]
-  data <- data[substr(var_name,1,2)=="tr",var_type:="tr"]
-  data <- data[substr(var_name,1,2)=="te",var_type:="te"]
-  data <- data[substr(var_name,1,2)=="cv",var_type:="cv"]
+  data <- data[substr(var_name,1,2)=="ss",var_type:="Symptoms and Signs"]
+  data <- data[substr(var_name,1,2)=="dx",var_type:="Diagnosis"]
+  data <- data[substr(var_name,1,2)=="tr",var_type:="Treatment"]
+  data <- data[substr(var_name,1,2)=="te",var_type:="Testing"]
+  data <- data[substr(var_name,1,2)=="cv",var_type:="Covariate"]
+  data[,var_name:=substring(var_name,4)]
+  data[,var_name:=gsub("Missing","Miss",var_name)]
   return(data)
 }
 
@@ -152,16 +154,23 @@ incl_top_15 <- format_vartypes(incl_top_15)
 
 ## Format variable names of predictors
 dx_map <- fread(paste0(data_dir,"/diagnosis_map.csv"))
-dx_grid <- data.table(expand.grid(diag_code=unique(dx_map$diag_code),admit=c("admit","final")))
+dx_grid <- data.table(expand.grid(diag_code=unique(dx_map$diag_code),prefix=c("dx_",""),admit=c("admit","final","misdiag")))
 dx_grid <- merge(dx_grid,dx_map,by="diag_code")
-dx_grid[,var_name:=paste0("dx_",admit,"_",diag_code)]
-dx_grid[,short_name:=paste0("dx_",admit,"_",short_name)]
-dx_grid <- dx_grid[,list(var_name,short_name)]
+dx_grid[,var_name:=paste0(prefix,admit,"_",diag_code)]
+dx_grid[,short_name:=paste0(prefix,admit,"_",short_name)]
+
+tr_matchvars <- copy(dx_map)
+tr_matchvars[,var_name:=paste0("match_",diag_code)]
+tr_matchvars[,short_name:=paste0("treatment_",short_name)]
 
 format_varnames <- function(data) { 
-  for(type in unique(dx_grid[,var_name])) {
+  for(type in sort(unique(dx_grid[,var_name]),decreasing=T)) {
     proper_name <- unique(dx_grid[var_name==type,short_name])
-    data[var_name==type,var_name:=proper_name]
+    data[,var_name:=gsub(type,proper_name,var_name)]
+  }
+  for(type in sort(unique(tr_matchvars[,var_name]),decreasing=T)) {
+    proper_name <- unique(tr_matchvars[var_name==type,short_name])
+    data[,var_name:=gsub(type,proper_name,var_name)]
   }
 }
 
@@ -196,6 +205,7 @@ incl_heat[,var_name:=gsub("No","",var_name)]
 ## Format inclusion and importance datasets similarly
 imp_heat <- merge(imp_top_15,method_labels,by="pred_method")
 imp_heat[,pred_method:=NULL]
+imp_heat[imp_type=="accuracy",imp_type:="acc"]
 imp_heat <- imp_heat[,model_expanded:=paste0(Method,"_",imp_type)]
 
 # incl_heat[pred_method=="lr",rank:=7] # All logistic is included in everything

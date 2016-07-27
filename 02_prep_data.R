@@ -127,48 +127,58 @@ check_missing <- function(dt) {
 check_missing(master_data)
 check_missing(test_data)
 
-## Create a correlation plot across variables
-## Current issue: Most variables are categorical rather than numeric, makes cor function not work
-
-## Currently, this only returns p values for each var, not var-var combinations. Why? Because combinations aren't looped both ways?
-# pos_dim <- dim(master_data)[2]
-# neg_dim <- (-1 * pos_dim)
-#             
-# mapply(function(x, y) chisq.test(x, y)$p.value, data.frame(master_data)[,neg_dim], MoreArgs=list(data.frame(master_data)[,pos_dim]))
-
-# This seems to return nulls for everything -- try chisq on 1x1 combos before getting more fancy
-# chisq.test(table(master_data[,te_bs_admit],master_data[,dx_admit_50]))
-# library(plyr)
-# 
-# combos <- combn(ncol(Dat),2)
-# 
-# chisq_results <- adply(combos, 2, function(x) {
-#   test <- tryCatch(chisq.test(Dat[, x[1]], Dat[, x[2]]),
-#                    error= function(err) {
-#                      print(paste0("One of these columns has no variance in obs"))
-#                      print(names(Dat[,c(x[1],x[2])))
-#                      err_frame <- data.frame(parameter=NA,statistic=NA,p.value=NA)
-#                      return(err_frame)
-#                     })
-#   
-#   out <- data.frame("Row" = colnames(Dat)[x[1]]
-#                     , "Column" = colnames(Dat[x[2]])
-#                     , "Chi.Square" = round(test$statistic,3)
-#                     ,  "df"= test$parameter
-#                     ,  "p.value" = round(test$p.value, 3)
-#   )
-#   return(out)
-# })  
-
-## Note that this doesn't account for multiple testing (but since this is descriptive, doesn't matter)
-## This needs a correlation matrix when what we have is a set of chi squared results
-# corrplot.mixed(cor(data.frame(data)), lower="circle", upper="color", 
-#                tl.pos="lt", diag="n", order="hclust", hclust.method="complete")
-
 
 #####################################################
 ## Output data objects to feed into random forest and logistic regression
 save.image(file=paste0(data_dir,"/02_prepped_data.RData"))
+
+## Create a table with number of total cases, proportion of dead out of cases, and number of dead out of cases
+  dx_cols <- names(master_data)[grepl("dx_admit_",names(master_data)) | grepl("dx_final_",names(master_data))]
+  dx_cols <- dx_cols[!dx_cols %in% c("dx_admit_count","dx_final_count")]
+  
+  total_cases <- master_data[,lapply(.SD,sum),.SDcols=dx_cols]
+  total_dead <- master_data[death=="Yes",lapply(.SD,sum),.SDcols=dx_cols]
+  
+  ## Format variable names
+  format_dx_vars <- function(data) {
+    data[,id:=1]
+    data <- melt(data,id.vars="id")
+    
+    data[grepl("admit",variable),admit_type:="Admission"] 
+    data[grepl("final",variable),admit_type:="Discharge"]
+    data[,diag_var:=as.numeric(gsub(".*_","",variable))]
+    data[,c("id","variable"):=NULL]
+    return(data)
+  }
+  
+  total_cases <- format_dx_vars(total_cases)
+  setnames(total_cases,"value","cases")
+  total_dead <- format_dx_vars(total_dead)
+  setnames(total_dead,"value","case_deaths")
+  
+  ## Combine datasets and add on diagnosis longnames
+  dx_master <- merge(total_cases,total_dead,by=c("diag_var","admit_type"))
+  dx_master[,case_death_rt := case_deaths/cases]
+  
+  diag_map <- fread(paste0(data_dir,"/diagnosis_map.csv"))
+  setnames(diag_map,"diag_code","diag_var")
+  diag_map[,short_name:=NULL]
+  dx_master <- merge(dx_master,diag_map,by=c("diag_var"))
+  
+  ## Format and output appropriately
+  dx_master <- dx_master[order(admit_type,-case_death_rt),]
+  dx_master[,case_death_rt:=round(case_death_rt*100,2)]
+  
+  dx_master <- dx_master[admit_type=="Discharge"]
+  dx_master[,c("diag_var","admit_type"):=NULL]
+  
+  dx_master[,cases:=formatC(cases, format="d", big.mark=',')]
+  
+  setcolorder(dx_master,c("diag_name","cases","case_deaths","case_death_rt"))
+  setnames(dx_master,c("cases","case_deaths","case_death_rt","diag_name"),
+           c("Total Cases","Case Deaths","Percent of Cases","Diagnosis"))
+  write.csv(dx_master,paste0(data_dir,"/02_case_deaths.csv"),row.names=F)
+
 
 ## Now, output a dataset and test formula only with variables present at admission
 dx_admit_vars <- dx_vars[grepl("admit",dx_vars)]
@@ -183,4 +193,5 @@ test_predict_vars <- predict_vars
 test_formula <- as.formula(paste("death~",paste(test_predict_vars,collapse="+")))
 master_data <- master_data[,.SD,.SDcols=c(test_predict_vars,outcome_vars)]
 save.image(file=paste0(data_dir,"/02_prepped_data_admitonly.RData"))
+
 
