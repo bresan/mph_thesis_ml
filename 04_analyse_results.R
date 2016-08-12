@@ -185,22 +185,10 @@ imp_top_15[,combined_varname := sprintf("%02d %s",rank,var_name)]
 ## For Heatmap of variable importance/inclusion, do some re-coding to make it sensible
 ## Logistic regression makes dummies, so we have to categorize them appropriately
 incl_heat <- copy(incl_top_15)
-incl_heat <- incl_heat[grepl("cv_age",var_name),var_name:="cv_age"]
-incl_heat <- incl_heat[grepl("ss_airway",var_name),var_name:="ss_airway"]
-incl_heat <- incl_heat[grepl("cv_site_id",var_name),var_name:="cv_site_id"]
-incl_heat <- incl_heat[grepl("ss_pallor",var_name),var_name:="ss_pallor"]
-incl_heat <- incl_heat[grepl("ss_temp_under35p5",var_name),var_name:="ss_temp_under35p5"]
-incl_heat <- incl_heat[grepl("te_hb_under7",var_name),var_name:="te_hb_under7"]
-incl_heat <- incl_heat[grepl("te_malaria_test",var_name),var_name:="te_malaria_test"]
-incl_heat <- incl_heat[grepl("dx_malaria_final",var_name),var_name:="dx_malaria_final"]
-incl_heat <- incl_heat[grepl("ss_jaundice",var_name),var_name:="ss_jaundice"]
-incl_heat <- incl_heat[grepl("ss_icrecession",var_name),var_name:="ss_icrecession"]
-incl_heat <- incl_heat[grepl("ss_wheezing",var_name),var_name:="ss_wheezing"]
-incl_heat <- incl_heat[grepl("ss_dpbreath",var_name),var_name:="ss_dpbreath"]
-incl_heat <- incl_heat[grepl("ss_cough2weeks",var_name),var_name:="ss_cough2weeks"]
-incl_heat <- incl_heat[grepl("flarnostril",var_name),var_name:="flarnostril"]
+incl_heat <- incl_heat[grepl("age",var_name),var_name:="age"]
 incl_heat[,var_name:=gsub("Yes","",var_name)]
 incl_heat[,var_name:=gsub("No","",var_name)]
+incl_heat[,var_name:=gsub("Miss","",var_name)]
 
 ## Format inclusion and importance datasets similarly
 imp_heat <- merge(imp_top_15,method_labels,by="pred_method")
@@ -229,7 +217,7 @@ heat_template[admit=="all",admit:="All Variables"]
 setnames(heat_template,"admit","Admit")
 
 ## Add a sort order for heat template
-sort_order <- unique(heat_template[,list(var_name,Admit,rank)]) 
+sort_order <- unique(heat_template[,list(model_expanded,var_name,Admit,rank)]) 
 sort_order <- sort_order[!is.na(rank),list(tot_num=length(rank),
                                            best_rank=min(rank)),
                          by=list(var_name,Admit)]
@@ -288,7 +276,7 @@ setkey(roc_results,Method,admit,Death_weight,fold,rep)
 calc_tpr_fpr <- function(tpr_threshold=.75) {
   dt <- roc_results[shift(tpr,1,type="lag") < tpr_threshold & tpr > tpr_threshold]
   dt <- dt[,list(mean=mean(fpr),lower=quantile(fpr,.025),upper=quantile(fpr,.975)),by=list(Method,admit,Death_weight)]
-  dt[,threshold:=paste0("FPR at ",tpr_threshold)]
+  dt[,threshold:=paste0("FPR at TPR ",tpr_threshold)]
   return(dt)
 }
 
