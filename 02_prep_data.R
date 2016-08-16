@@ -104,7 +104,7 @@ convert_factors <- function(dt) {
 master_data <- convert_factors(master_data) 
 test_data <- convert_factors(test_data)
 
-## Check for missing variables in dataset (random forests do not do well with missing observations
+## Check for missing variables in dataset (random forests do not do well with missing observations)
 ## Solution: Convert to character and label as informative missing
 check_missing <- function(dt) {
   num_cols <- names(dt[,.SD,.SDcols=sapply(dt,is.numeric)])
@@ -119,6 +119,7 @@ check_missing <- function(dt) {
   if(length(miss_vars) > 0) {
     print(paste0("The following variables have missing values: "))
     print(miss_dt[num_missing>0,])
+    stop()
   } else {
     print(paste0("No variables with missing values present in the dataset"))
   }

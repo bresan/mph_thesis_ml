@@ -293,20 +293,3 @@ save(best_auc,auc_summary,acc_summary,hl_summary,
      file=paste0(out_dir,"/results.RData"))
 
 
-# png(file=paste0(fig_dir,"/roc_admit.png"),width=700,height=350)
-# plot <- ggplot(NULL,aes(x=fpr,y=tpr, group=interaction(rep,fold))) +
-#   geom_line(data=roc_results[median == 0,],alpha=.1) +
-#   geom_line(data=roc_results[median == 1,], color="red") +
-#   facet_wrap(~ admit+Method, ncol=5) +
-#   ggtitle(paste0("ROC by dataset (admission-only vs. all) and method, one line per rep/fold combination"))
-# print(plot)
-# dev.off()
-# 
-# ## Graph just the median ROC curves
-# png(file=paste0(fig_dir,"/roc_median.png"),width=700,height=350)
-# plot <- ggplot(data=roc_results[median == 1,],aes(x=fpr,y=tpr,color=Method)) +
-#   geom_line() +
-#   facet_wrap(~admit) +
-#   ggtitle("Median (by AUC) ROC curves of all tested methods \n By dataset (admission-data only or all data)") 
-# print(plot)
-# dev.off()
